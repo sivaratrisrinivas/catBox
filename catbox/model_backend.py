@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import Callable, Literal, Protocol, TypedDict
+from typing import Callable, Literal, Mapping, Protocol, TypedDict
 
 Outcome = Literal["living", "absent"]
 
@@ -36,7 +36,12 @@ ObservationResponse = GeneratedOutcome | GenerationFailure
 class ModelRunner(Protocol):
     def is_ready(self) -> bool: ...
 
-    def generate(self, outcome: Outcome, seed: int) -> dict[str, object]: ...
+    def generate(
+        self,
+        outcome: Outcome,
+        seed: int,
+        config: dict[str, object] | None = None,
+    ) -> dict[str, object]: ...
 
 
 class FakeModelRunner:
@@ -48,8 +53,16 @@ class FakeModelRunner:
     def is_ready(self) -> bool:
         return self._ready
 
-    def generate(self, outcome: Outcome, seed: int) -> dict[str, object]:
-        self.generations.append({"outcome": outcome, "seed": seed})
+    def generate(
+        self,
+        outcome: Outcome,
+        seed: int,
+        config: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        generation: dict[str, object] = {"outcome": outcome, "seed": seed}
+        if config is not None:
+            generation["config"] = config
+        self.generations.append(generation)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         image_path = self.output_dir / f"{outcome}_{seed}.png"
         image_path.write_bytes(_ONE_PIXEL_PNG)
@@ -78,8 +91,46 @@ class CatboxModelBackend:
         return {"status": "starting", "modelBackend": "starting"}
 
     def observe(self) -> ObservationResponse:
-        seed = self._seed_source()
-        outcome = self._outcome_source()
+        return self._observe()
+
+    def observe_with_dev_controls(self, overrides: dict[str, object]) -> ObservationResponse:
+        forced_outcome = overrides.get("outcome")
+        if forced_outcome is not None and forced_outcome not in VALID_OUTCOMES:
+            return self._dev_controls_failure(
+                field="outcome",
+                message=f"Unsupported Dev Controls outcome override: {forced_outcome}",
+            )
+
+        seed_override = overrides.get("seed")
+        if seed_override is not None and not isinstance(seed_override, int):
+            return self._dev_controls_failure(
+                field="seed",
+                message="Dev Controls seed override must be an integer.",
+            )
+
+        config_overrides = overrides.get("config")
+        if config_overrides is not None and not isinstance(config_overrides, Mapping):
+            return self._dev_controls_failure(
+                field="config",
+                message="Dev Controls config override must be an object.",
+            )
+        if config_overrides is not None:
+            config_overrides = dict(config_overrides)
+
+        return self._observe(
+            outcome_override=forced_outcome,
+            seed_override=seed_override,
+            config_overrides=config_overrides,
+        )
+
+    def _observe(
+        self,
+        outcome_override: object | None = None,
+        seed_override: object | None = None,
+        config_overrides: object | None = None,
+    ) -> ObservationResponse:
+        seed = seed_override if seed_override is not None else self._seed_source()
+        outcome = outcome_override if outcome_override is not None else self._outcome_source()
         if outcome not in VALID_OUTCOMES:
             return self._generation_failure(
                 seed=seed,
@@ -89,7 +140,7 @@ class CatboxModelBackend:
 
         started_at = self._clock()
         try:
-            generated = self._model_runner.generate(outcome, seed)
+            generated = self._model_runner.generate(outcome, seed, config_overrides)
         except Exception as error:
             return self._generation_failure(
                 seed=seed,
@@ -98,16 +149,20 @@ class CatboxModelBackend:
                 outcome=outcome,
             )
 
+        metadata: dict[str, object] = {
+            "seed": seed,
+            "startedAt": started_at,
+            "generationSeconds": generated["generation_seconds"],
+            "ephemeral": True,
+        }
+        if config_overrides is not None:
+            metadata["configOverrides"] = config_overrides
+
         return {
             "status": "generated",
             "outcome": outcome,
             "imageRef": str(generated["image_ref"]),
-            "metadata": {
-                "seed": seed,
-                "startedAt": started_at,
-                "generationSeconds": generated["generation_seconds"],
-                "ephemeral": True,
-            },
+            "metadata": metadata,
             "revealNote": "A local diffusion model generated this outcome for this observation.",
         }
 
@@ -131,6 +186,20 @@ class CatboxModelBackend:
                 "message": message,
             },
             "metadata": metadata,
+        }
+
+    @staticmethod
+    def _dev_controls_failure(field: str, message: str) -> GenerationFailure:
+        return {
+            "status": "generation_failed",
+            "error": {
+                "type": "InvalidDevControlsOverride",
+                "field": field,
+                "message": message,
+            },
+            "metadata": {
+                "ephemeral": True,
+            },
         }
 
     @staticmethod

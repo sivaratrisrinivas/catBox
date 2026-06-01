@@ -1,38 +1,41 @@
 # catBox
 
-Catbox is an interactive image-generation demo where opening a sealed box triggers
-a local diffusion model and resolves into either a Living-Cat Outcome or an
-Absent-Cat Outcome.
+Catbox is an interactive image-generation demo. You open a sealed box, a local
+image model runs, and the box turns into either a cozy cat scene or an eerie
+empty-box scene.
 
-## Thin Model Backend contract
+## Model backend
 
-The first implementation slice is a fake-backed Model Backend contract. It gives
-Catbox a stable Python boundary before the real SD Turbo runner is wired in:
+The current code defines the small Python boundary that the browser will call
+later:
 
-- `readiness()` reports whether the Model Backend is ready for observations.
-- `observe()` performs backend-owned Outcome Selection for the normal experience.
-- Successful observations return a Generated Outcome contract with an outcome,
-  local image file reference, timing/config metadata, and a Reveal Note.
-- Failed observations return an explicit Generation Failure contract and never
-  substitute a static or fake Generated Outcome.
+- `readiness()` says whether the model backend is ready.
+- `observe()` is the normal path. The backend chooses which scene to generate.
+- `observe_with_dev_controls(...)` is for development only. It can force the cat
+  scene or the empty-box scene, and it can reuse a seed or generation settings.
+- Successful observations return the chosen scene, a local image file path,
+  timing details, and a short note for the reveal.
+- Failed observations return a clear error instead of pretending that an image
+  was generated.
 
-The fake runner is a test double, not the product experience. It lets the backend
-contract, Outcome Selection, failure behavior, and Browser UI integration target
-be tested quickly without CUDA, Diffusers, model downloads, or 20-second
-generation runs. The real product path still belongs behind the same Model Runner
-interface and must generate actual Ephemeral Outcomes.
+The fake runner is only for tests and early wiring. It lets the backend behavior
+be checked quickly without CUDA, model downloads, or slow image generation. The
+real product path still needs to run a real local image model behind the same
+runner interface.
 
 ## Why this exists
 
-The model spike proved that `sd_turbo_img2img` can produce Recognizable Outcomes
-within the Primary Runtime Target after the model is preloaded. This backend
-contract turns that spike evidence into a product boundary:
+The model spike showed that `sd_turbo_img2img` can create recognizable cat and
+empty-box images after the model is loaded. This backend turns that experiment
+into code the rest of Catbox can use:
 
-- the Browser UI observes Catbox instead of choosing the outcome;
-- the Model Backend is the source of truth for the selected Outcome;
-- generated images are returned as local file references plus metadata;
-- failures stay visible as Generation Failure rather than being hidden by static
-  fallbacks.
+- the browser asks to observe the box instead of choosing the result itself;
+- the backend is the source of truth for which scene was chosen;
+- Dev Controls can force `living` or `absent` without changing normal
+  observation behavior;
+- Dev Controls can pass a seed and generation settings to reproduce a run;
+- generated images are returned as local file paths plus details about the run;
+- failures stay visible instead of being hidden behind placeholder images.
 
 ## How to verify
 
@@ -42,5 +45,5 @@ Run the contract tests:
 python -m unittest discover -s tests
 ```
 
-These tests use the fake Model Runner and do not require GPU access. Manual GPU
-validation is a separate step once the persistent SD Turbo runner is connected.
+These tests use the fake runner and do not need GPU access. Manual GPU testing
+comes later, once the real SD Turbo runner is connected.

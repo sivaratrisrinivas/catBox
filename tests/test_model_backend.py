@@ -6,7 +6,7 @@ from catbox.model_backend import CatboxModelBackend, FakeModelRunner
 
 
 class FailingModelRunner(FakeModelRunner):
-    def generate(self, outcome, seed):
+    def generate(self, outcome, seed, config=None):
         raise RuntimeError("CUDA ran out of memory")
 
 
@@ -85,3 +85,128 @@ class ModelBackendTests(TestCase):
 
             self.assertEqual(response["status"], "generated")
             self.assertEqual(runner.generations, [{"outcome": "absent", "seed": 41100}])
+
+    def test_dev_controls_can_force_living_outcome(self):
+        with TemporaryDirectory() as output_dir:
+            runner = FakeModelRunner(output_dir=output_dir)
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                seed_source=lambda: 41100,
+                outcome_source=lambda: "absent",
+            )
+
+            response = backend.observe_with_dev_controls({"outcome": "living"})
+
+            self.assertEqual(response["status"], "generated")
+            self.assertEqual(response["outcome"], "living")
+            self.assertEqual(runner.generations, [{"outcome": "living", "seed": 41100}])
+
+    def test_dev_controls_can_force_absent_outcome(self):
+        with TemporaryDirectory() as output_dir:
+            runner = FakeModelRunner(output_dir=output_dir)
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                seed_source=lambda: 41100,
+                outcome_source=lambda: "living",
+            )
+
+            response = backend.observe_with_dev_controls({"outcome": "absent"})
+
+            self.assertEqual(response["status"], "generated")
+            self.assertEqual(response["outcome"], "absent")
+            self.assertEqual(runner.generations, [{"outcome": "absent", "seed": 41100}])
+
+    def test_dev_controls_can_override_seed_for_reproducible_observation(self):
+        with TemporaryDirectory() as output_dir:
+            runner = FakeModelRunner(output_dir=output_dir)
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                seed_source=lambda: 41100,
+                outcome_source=lambda: "living",
+            )
+
+            response = backend.observe_with_dev_controls({"seed": 90210})
+
+            self.assertEqual(response["status"], "generated")
+            self.assertEqual(response["metadata"]["seed"], 90210)
+            self.assertEqual(runner.generations, [{"outcome": "living", "seed": 90210}])
+
+    def test_dev_controls_pass_config_overrides_to_generation_metadata_and_runner(self):
+        with TemporaryDirectory() as output_dir:
+            runner = FakeModelRunner(output_dir=output_dir)
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                seed_source=lambda: 41100,
+                outcome_source=lambda: "absent",
+            )
+
+            response = backend.observe_with_dev_controls(
+                {"config": {"steps": 6, "strength": 0.55}}
+            )
+
+            self.assertEqual(response["status"], "generated")
+            self.assertEqual(
+                response["metadata"]["configOverrides"],
+                {"steps": 6, "strength": 0.55},
+            )
+            self.assertEqual(
+                runner.generations,
+                [
+                    {
+                        "outcome": "absent",
+                        "seed": 41100,
+                        "config": {"steps": 6, "strength": 0.55},
+                    }
+                ],
+            )
+
+    def test_invalid_dev_controls_outcome_fails_clearly_without_generation(self):
+        with TemporaryDirectory() as output_dir:
+            runner = FakeModelRunner(output_dir=output_dir)
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                seed_source=lambda: 41100,
+            )
+
+            response = backend.observe_with_dev_controls({"outcome": "ghost"})
+
+            self.assertEqual(response["status"], "generation_failed")
+            self.assertEqual(response["error"]["type"], "InvalidDevControlsOverride")
+            self.assertEqual(response["error"]["field"], "outcome")
+            self.assertIn("ghost", response["error"]["message"])
+            self.assertNotIn("imageRef", response)
+            self.assertEqual(runner.generations, [])
+
+    def test_invalid_dev_controls_seed_fails_clearly_without_generation(self):
+        with TemporaryDirectory() as output_dir:
+            runner = FakeModelRunner(output_dir=output_dir)
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                outcome_source=lambda: "living",
+            )
+
+            response = backend.observe_with_dev_controls({"seed": "not-a-seed"})
+
+            self.assertEqual(response["status"], "generation_failed")
+            self.assertEqual(response["error"]["type"], "InvalidDevControlsOverride")
+            self.assertEqual(response["error"]["field"], "seed")
+            self.assertIn("integer", response["error"]["message"])
+            self.assertNotIn("imageRef", response)
+            self.assertEqual(runner.generations, [])
+
+    def test_invalid_dev_controls_config_fails_clearly_without_generation(self):
+        with TemporaryDirectory() as output_dir:
+            runner = FakeModelRunner(output_dir=output_dir)
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                outcome_source=lambda: "living",
+            )
+
+            response = backend.observe_with_dev_controls({"config": ["steps", 6]})
+
+            self.assertEqual(response["status"], "generation_failed")
+            self.assertEqual(response["error"]["type"], "InvalidDevControlsOverride")
+            self.assertEqual(response["error"]["field"], "config")
+            self.assertIn("object", response["error"]["message"])
+            self.assertNotIn("imageRef", response)
+            self.assertEqual(runner.generations, [])
