@@ -1,0 +1,8 @@
+.venv/
+.uv-cache/
+.hf-cache/
+__pycache__/
+.pytest_cache/
+
+# Raw model-spike outputs are development evidence, not product artifacts.
+experiments/model-spike/outputs/
