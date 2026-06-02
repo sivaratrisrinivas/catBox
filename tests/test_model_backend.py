@@ -290,7 +290,7 @@ class SdTurboRunnerTests(TestCase):
             self.assertEqual(generated["generation_seconds"], 0.25)
             self.assertTrue(Path(generated["image_ref"]).exists())
             self.assertIn("living cat", pipeline.calls[0]["prompt"])
-            self.assertEqual(pipeline.calls[0]["num_inference_steps"], 2)
+            self.assertEqual(pipeline.calls[0]["num_inference_steps"], 4)
             self.assertEqual(pipeline.calls[0]["strength"], 0.8)
             self.assertEqual(box_image_loads, [{"width": 384, "height": 384}])
             self.assertNotIn("negative_prompt", pipeline.calls[0])

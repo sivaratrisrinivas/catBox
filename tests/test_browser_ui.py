@@ -1,10 +1,12 @@
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 from urllib.parse import quote
 
-from catbox.browser_ui import BrowserUiApp
+from catbox.browser_ui import BrowserUiApp, make_default_browser_ui_server
 
 
 class RecordingBackend:
@@ -77,6 +79,9 @@ class BrowserUiServerTests(TestCase):
         self.assertIn("PROGRESSIVE_WAITING_DELAY_MS", html)
         self.assertIn("showProgressiveWaiting", html)
         self.assertIn("id=\"generated-outcome\"", html)
+        self.assertIn("data-loading=\"true\"", html)
+        self.assertIn("generatedOutcome.onload", html)
+        self.assertIn("generatedOutcome.onerror", html)
         self.assertIn("id=\"reveal-note\"", html)
         self.assertIn("id=\"reset-button\"", html)
         self.assertIn("data-state=\"generation-failure\"", html)
@@ -86,6 +91,9 @@ class BrowserUiServerTests(TestCase):
         self.assertIn("retryButton.addEventListener(\"click\", observe)", html)
         self.assertIn("failureResetButton.addEventListener(\"click\", resetToSealed)", html)
         self.assertIn("generationFailureMessage.textContent = \"\"", html)
+        self.assertIn("transform: scale(0.97)", html)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", html)
+        self.assertIn("@media (hover: hover) and (pointer: fine)", html)
         self.assertNotIn("name=\"outcome\"", html)
 
     def test_readiness_endpoint_returns_backend_startup_state(self):
@@ -146,3 +154,34 @@ class BrowserUiServerTests(TestCase):
             "/api/generated-outcome?imageRef=/tmp/not-generated.png",
         )
         self.assertEqual(image_response.status, 404)
+
+    def test_default_server_loads_hf_token_from_env_file_before_model_runner(self):
+        with TemporaryDirectory() as project_dir:
+            env_file = Path(project_dir) / ".env"
+            env_file.write_text("HF_TOKEN=hf_test_token\n", encoding="utf-8")
+            observed_token = []
+
+            class TokenAwareRunner:
+                def __init__(self, runtime_dir):
+                    observed_token.append(os.environ.get("HF_TOKEN"))
+
+                def is_ready(self):
+                    return True
+
+                def generate(self, outcome, seed, config=None):
+                    return {
+                        "image_ref": "/tmp/generated.png",
+                        "generation_seconds": 0.1,
+                        "metadata": {},
+                    }
+
+            with patch.dict(os.environ, {}, clear=True):
+                with patch("catbox.browser_ui.SdTurboImageToImageModelRunner", TokenAwareRunner):
+                    with patch("catbox.browser_ui.CatboxBrowserUiServer") as server_class:
+                        make_default_browser_ui_server(
+                            ("127.0.0.1", 0),
+                            env_file=env_file,
+                        )
+                        self.assertEqual(server_class.call_count, 1)
+
+            self.assertEqual(observed_token, ["hf_test_token"])

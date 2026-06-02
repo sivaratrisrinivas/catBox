@@ -58,11 +58,14 @@ be checked quickly without CUDA, model downloads, or slow image generation.
 
 The local Browser UI is served by `python -m catbox.browser_ui`. It starts from
 a sealed box, sends a normal observation request without choosing an outcome,
-waits while the Model Backend runs, reveals the generated image from the
-backend-provided local file reference, shows the Reveal Note, and supports Reset
-back to the sealed box. If generation fails, the Browser UI shows Generation
-Failure with Retry and Reset instead of registering or serving a fake generated
-image.
+waits while the Model Backend runs, and reveals the generated image only after
+the backend-provided local file reference has loaded. The Browser UI uses
+theatrical Observation Noise, Progressive Waiting, responsive press/hover
+states, reduced-motion handling, and a polished generated-image reveal while
+keeping the Model Backend authoritative. It shows the Reveal Note and supports
+Reset back to the sealed box. If generation fails, the Browser UI shows
+Generation Failure with Retry and Reset instead of registering or serving a fake
+generated image.
 
 ## How the project fits together
 
@@ -85,16 +88,32 @@ image.
 Run the contract tests:
 
 ```bash
-python -m unittest discover -s tests
+uv run python -m unittest discover -s tests
 ```
 
 These tests use fakes and stubs around the expensive model path. They do not
 need GPU access or model downloads.
 
+If you want Hugging Face authenticated downloads, create a local `.env` file:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+```text
+HF_TOKEN=hf_your_read_token_here
+```
+
+The Browser UI startup command and manual validation command load `.env` before
+the SD Turbo runner requests model files. `.env` is ignored by git and should
+not be committed.
+
 Run the local Browser UI:
 
 ```bash
-python -m catbox.browser_ui
+uv run python -m catbox.browser_ui
 ```
 
 Then open `http://127.0.0.1:8765`. The page starts from the sealed box, sends a
@@ -111,7 +130,7 @@ completes.
 Manual GPU validation for the preferred local machine:
 
 ```bash
-python -m catbox.validate_sd_turbo_runner --outcome all --seed 41100
+uv run python -m catbox.validate_sd_turbo_runner --outcome all --seed 41100
 ```
 
 That command preloads SD Turbo once, forces both Catbox outcomes through the
@@ -119,7 +138,7 @@ development-only path, writes ephemeral generated images under `.runtime/`, and
 prints the same response shape the Browser UI will use.
 
 The current preferred settings were manually validated on the local CUDA path:
-the Living-Cat Outcome uses 384px image-to-image generation with 2 steps, and
+the Living-Cat Outcome uses 384px image-to-image generation with 4 steps, and
 the Absent-Cat Outcome uses 512px image-to-image generation with 2 steps.
 
 For the complete first-observation GPU validation checklist, including Browser

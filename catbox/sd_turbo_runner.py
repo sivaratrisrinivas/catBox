@@ -52,7 +52,7 @@ NEGATIVE_PROMPTS: dict[Outcome, str] = {
 }
 
 OUTCOME_DEFAULTS: dict[Outcome, dict[str, object]] = {
-    "living": {"steps": 2, "strength": 0.8, "width": 384, "height": 384},
+    "living": {"steps": 4, "strength": 0.8, "width": 384, "height": 384},
     "absent": {"steps": 2, "strength": 0.55},
 }
 

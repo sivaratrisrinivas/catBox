@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import parse_qs, urlparse
 
+from catbox.env_loader import DEFAULT_ENV_FILE, load_env_file
 from catbox.model_backend import CatboxModelBackend
 from catbox.sd_turbo_runner import DEFAULT_RUNTIME_DIR, SdTurboImageToImageModelRunner
 
@@ -127,7 +128,9 @@ def make_browser_ui_server(
 def make_default_browser_ui_server(
     server_address: tuple[str, int],
     runtime_dir: str | Path = DEFAULT_RUNTIME_DIR,
+    env_file: str | Path = DEFAULT_ENV_FILE,
 ) -> CatboxBrowserUiServer:
+    load_env_file(env_file)
     backend = CatboxModelBackend(
         model_runner=SdTurboImageToImageModelRunner(runtime_dir=runtime_dir)
     )
@@ -163,9 +166,21 @@ _BROWSER_UI_HTML = """<!doctype html>
   <style>
     :root {
       color-scheme: dark;
+      --bg: #131313;
+      --surface: #1d1b19;
+      --surface-soft: rgba(255, 255, 255, 0.055);
+      --text: #f6efe4;
+      --muted: rgba(246, 239, 228, 0.66);
+      --border: rgba(246, 239, 228, 0.16);
+      --amber: #d8a05f;
+      --amber-strong: #f1bc74;
+      --teal: #6dc9bd;
+      --danger: #e46f5f;
+      --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+      --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #171717;
-      color: #f5f0e8;
+      background: var(--bg);
+      color: var(--text);
     }
 
     * {
@@ -177,74 +192,195 @@ _BROWSER_UI_HTML = """<!doctype html>
       min-height: 100vh;
       display: grid;
       place-items: center;
+      padding: 28px 18px;
       background:
-        radial-gradient(circle at 50% 18%, rgba(198, 85, 70, 0.2), transparent 28rem),
-        linear-gradient(145deg, #161616, #22201d 54%, #101010);
+        radial-gradient(circle at 22% 12%, rgba(109, 201, 189, 0.18), transparent 24rem),
+        radial-gradient(circle at 78% 16%, rgba(228, 111, 95, 0.16), transparent 28rem),
+        linear-gradient(145deg, #121212 0%, #211c18 58%, #101010 100%);
     }
 
     main {
-      width: min(92vw, 760px);
+      width: min(94vw, 780px);
       display: grid;
-      gap: 24px;
+      gap: 18px;
       justify-items: center;
       text-align: center;
     }
 
-    .stage {
-      width: min(88vw, 560px);
-      aspect-ratio: 1.18;
+    .brand {
+      display: grid;
+      gap: 6px;
+      justify-items: center;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.35rem, 10vw, 5.5rem);
+      font-weight: 850;
+      line-height: 0.88;
+      letter-spacing: 0;
+    }
+
+    .tagline {
+      margin: 0;
+      max-width: 36rem;
+      color: var(--muted);
+      font-size: clamp(0.95rem, 2.6vw, 1.08rem);
+      line-height: 1.45;
+    }
+
+    .viewport {
+      width: 100%;
+      min-height: min(86vh, 690px);
       display: grid;
       place-items: center;
-      border: 1px solid rgba(245, 240, 232, 0.14);
-      background: rgba(255, 255, 255, 0.035);
+      position: relative;
+    }
+
+    .stage {
+      width: min(88vw, 620px);
+      aspect-ratio: 1.12;
+      display: grid;
+      place-items: center;
+      position: relative;
+      border: 1px solid var(--border);
+      background:
+        radial-gradient(circle at 50% 32%, rgba(246, 239, 228, 0.09), transparent 18rem),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
       overflow: hidden;
+      box-shadow: 0 34px 90px rgba(0, 0, 0, 0.34);
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 34%;
+      background: linear-gradient(180deg, transparent, rgba(216, 160, 95, 0.14));
+      pointer-events: none;
+    }
+
+    .stage::after {
+      content: "";
+      position: absolute;
+      width: 70%;
+      height: 1px;
+      bottom: 28%;
+      background: linear-gradient(90deg, transparent, rgba(246, 239, 228, 0.2), transparent);
+      pointer-events: none;
     }
 
     .box {
-      width: min(58vw, 300px);
+      width: min(58vw, 330px);
       aspect-ratio: 1.25;
       position: relative;
-      border: 2px solid #d8aa72;
-      background: linear-gradient(#9f6a38, #6e431f);
-      box-shadow: 0 26px 60px rgba(0, 0, 0, 0.45);
+      transform-style: preserve-3d;
+      transform: translateY(12px) perspective(760px) rotateX(2deg);
+      border: 2px solid rgba(241, 188, 116, 0.78);
+      background:
+        linear-gradient(115deg, rgba(255, 255, 255, 0.11), transparent 34%),
+        linear-gradient(#9f6a38, #6d421f);
+      box-shadow:
+        0 34px 70px rgba(0, 0, 0, 0.44),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      transition: transform 240ms var(--ease-out);
     }
 
     .box::before {
       content: "";
       position: absolute;
-      inset: -44px -16px auto;
-      height: 54px;
-      border: 2px solid #e0b782;
-      background: linear-gradient(#bb8447, #7c4d25);
-      transform: perspective(260px) rotateX(46deg);
+      inset: -52px -18px auto;
+      height: 62px;
+      border: 2px solid rgba(241, 188, 116, 0.88);
+      background:
+        linear-gradient(110deg, rgba(255, 255, 255, 0.14), transparent 42%),
+        linear-gradient(#bf884c, #7d4d25);
+      transform: perspective(280px) rotateX(48deg);
       transform-origin: bottom;
+      box-shadow: 0 18px 24px rgba(0, 0, 0, 0.18);
+      transition: transform 320ms var(--ease-in-out), inset 320ms var(--ease-in-out);
+    }
+
+    .box::after {
+      content: "";
+      position: absolute;
+      inset: 22% 18% auto;
+      height: 26%;
+      background: radial-gradient(ellipse, rgba(0, 0, 0, 0.22), transparent 66%);
+      transform: translateY(16px);
+      opacity: 0.64;
     }
 
     .panel {
-      display: none;
+      position: absolute;
+      inset: 0;
       width: 100%;
+      min-height: 100%;
+      display: grid;
+      align-content: center;
       justify-items: center;
       gap: 18px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(10px) scale(0.985);
+      filter: blur(2px);
+      transition:
+        opacity 190ms var(--ease-out),
+        transform 220ms var(--ease-out),
+        filter 220ms var(--ease-out);
     }
 
     .panel.is-active {
+      position: relative;
       display: grid;
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
     }
 
     button {
       min-width: 148px;
-      min-height: 44px;
-      border: 1px solid rgba(245, 240, 232, 0.2);
-      background: #f5f0e8;
-      color: #191817;
+      min-height: 46px;
+      border: 1px solid rgba(246, 239, 228, 0.28);
+      background: linear-gradient(180deg, #fff6e7, #e6c99f);
+      color: #1b1714;
       font: inherit;
       font-weight: 700;
+      border-radius: 8px;
       cursor: pointer;
+      box-shadow:
+        0 14px 34px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      transition:
+        transform 140ms var(--ease-out),
+        box-shadow 180ms var(--ease-out),
+        border-color 180ms ease,
+        opacity 180ms ease;
+    }
+
+    button:active {
+      transform: scale(0.97);
     }
 
     button:disabled {
       opacity: 0.55;
       cursor: progress;
+      box-shadow: none;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      button:not(:disabled):hover {
+        transform: translateY(-1px);
+        border-color: rgba(246, 239, 228, 0.48);
+        box-shadow:
+          0 18px 40px rgba(0, 0, 0, 0.32),
+          inset 0 1px 0 rgba(255, 255, 255, 0.58);
+      }
+
+      button:not(:disabled):hover:active {
+        transform: translateY(0) scale(0.97);
+      }
     }
 
     .actions {
@@ -255,26 +391,65 @@ _BROWSER_UI_HTML = """<!doctype html>
     }
 
     .noise {
-      width: min(72vw, 420px);
-      aspect-ratio: 1.4;
+      width: min(78vw, 520px);
+      aspect-ratio: 1.18;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--border);
       background:
-        repeating-radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.18) 0 1px, transparent 1px 5px),
-        repeating-linear-gradient(112deg, rgba(237, 191, 115, 0.2) 0 2px, transparent 2px 8px),
-        #202020;
-      animation: pulse 900ms steps(2, end) infinite;
+        radial-gradient(circle at 50% 46%, rgba(109, 201, 189, 0.18), transparent 15rem),
+        repeating-linear-gradient(102deg, rgba(241, 188, 116, 0.18) 0 1px, transparent 1px 8px),
+        repeating-radial-gradient(circle at 26% 24%, rgba(246, 239, 228, 0.16) 0 1px, transparent 1px 5px),
+        #171717;
+      box-shadow: 0 30px 78px rgba(0, 0, 0, 0.36);
+      animation: observation-pulse 760ms steps(2, end) infinite;
     }
 
-    @keyframes pulse {
+    .noise::before,
+    .noise::after {
+      content: "";
+      position: absolute;
+      inset: 18%;
+      border: 1px solid rgba(246, 239, 228, 0.22);
+      transform: rotate(45deg) scale(0.84);
+      animation: aperture 1600ms var(--ease-in-out) infinite alternate;
+    }
+
+    .noise::after {
+      inset: 29%;
+      border-color: rgba(109, 201, 189, 0.34);
+      animation-delay: 180ms;
+    }
+
+    @keyframes observation-pulse {
       from { filter: contrast(1); }
-      to { filter: contrast(1.8) brightness(1.08); }
+      to { filter: contrast(1.75) brightness(1.08); }
+    }
+
+    @keyframes aperture {
+      from { transform: rotate(45deg) scale(0.78); opacity: 0.38; }
+      to { transform: rotate(45deg) scale(1.04); opacity: 0.74; }
     }
 
     img {
-      width: min(88vw, 560px);
+      width: min(88vw, 620px);
       aspect-ratio: 1;
       object-fit: contain;
-      background: #101010;
-      border: 1px solid rgba(245, 240, 232, 0.16);
+      background: #111;
+      border: 1px solid var(--border);
+      box-shadow: 0 32px 86px rgba(0, 0, 0, 0.38);
+      opacity: 1;
+      transform: scale(1);
+      transition:
+        opacity 240ms var(--ease-out),
+        transform 280ms var(--ease-out),
+        filter 280ms var(--ease-out);
+    }
+
+    img[data-loading="true"] {
+      opacity: 0;
+      transform: scale(0.975);
+      filter: blur(4px);
     }
 
     .meta,
@@ -282,7 +457,23 @@ _BROWSER_UI_HTML = """<!doctype html>
       margin: 0;
       max-width: 54ch;
       line-height: 1.55;
-      color: rgba(245, 240, 232, 0.76);
+      color: var(--muted);
+    }
+
+    .meta {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-soft);
+      color: rgba(246, 239, 228, 0.78);
+      font-size: 0.88rem;
+    }
+
+    [hidden] {
+      display: none !important;
     }
 
     .failure-title {
@@ -290,49 +481,103 @@ _BROWSER_UI_HTML = """<!doctype html>
       font-size: clamp(1.35rem, 5vw, 2rem);
       line-height: 1.1;
     }
+
+    #generation-failure-panel .stage {
+      border-color: rgba(228, 111, 95, 0.34);
+      background:
+        radial-gradient(circle at 50% 38%, rgba(228, 111, 95, 0.17), transparent 16rem),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
+    }
+
+    @media (max-width: 560px) {
+      body {
+        padding: 20px 12px;
+      }
+
+      main {
+        gap: 14px;
+      }
+
+      .viewport {
+        min-height: min(82vh, 610px);
+      }
+
+      .stage,
+      img {
+        width: min(94vw, 620px);
+      }
+
+      .box {
+        width: min(66vw, 300px);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 1ms !important;
+      }
+
+      .panel,
+      img[data-loading="true"] {
+        transform: none;
+        filter: none;
+      }
+    }
   </style>
 </head>
 <body>
   <main>
-    <section class="panel is-active" data-state="starting" id="starting-panel" aria-live="polite">
-      <div class="stage" aria-label="Catbox model backend startup">
-        <div class="box"></div>
-      </div>
-      <p class="note">Preparing the model backend</p>
-    </section>
+    <header class="brand">
+      <h1>Catbox</h1>
+      <p class="tagline">Observe the sealed box. The local model resolves one generated outcome.</p>
+    </header>
 
-    <section class="panel" data-state="sealed" id="sealed-panel" aria-live="polite">
-      <div class="stage" aria-label="A sealed Catbox">
-        <div class="box"></div>
-      </div>
-      <button id="observe-button" type="button">Observe</button>
-    </section>
-
-    <section class="panel" data-state="waiting" id="waiting-panel" aria-live="polite">
-      <div class="noise" aria-hidden="true"></div>
-      <p class="note">Observation noise</p>
-      <p class="note" id="progressive-waiting-status" hidden>The model backend is still generating this observation.</p>
-    </section>
-
-    <section class="panel" data-state="revealed" id="revealed-panel" aria-live="polite">
-      <img id="generated-outcome" alt="Generated Outcome">
-      <p class="meta" id="outcome-metadata"></p>
-      <p class="note" id="reveal-note"></p>
-      <button id="reset-button" type="button">Reset</button>
-    </section>
-
-    <section class="panel" data-state="generation-failure" id="generation-failure-panel" aria-live="assertive">
-      <div class="stage" aria-label="Generation Failure">
-        <div>
-          <h1 class="failure-title">Generation Failure</h1>
-          <p class="note" id="generation-failure-message"></p>
+    <div class="viewport">
+      <section class="panel is-active" data-state="starting" id="starting-panel" aria-live="polite">
+        <div class="stage" aria-label="Catbox model backend startup">
+          <div class="box"></div>
         </div>
-      </div>
-      <div class="actions">
-        <button id="retry-button" type="button">Retry</button>
-        <button id="failure-reset-button" type="button">Reset</button>
-      </div>
-    </section>
+        <p class="note">Preparing the model backend</p>
+      </section>
+
+      <section class="panel" data-state="sealed" id="sealed-panel" aria-live="polite">
+        <div class="stage" aria-label="A sealed Catbox">
+          <div class="box"></div>
+        </div>
+        <button id="observe-button" type="button">Observe</button>
+      </section>
+
+      <section class="panel" data-state="waiting" id="waiting-panel" aria-live="polite">
+        <div class="noise" aria-hidden="true"></div>
+        <p class="note">Observation noise</p>
+        <p class="note" id="progressive-waiting-status" hidden>The model backend is still generating this observation.</p>
+      </section>
+
+      <section class="panel" data-state="revealed" id="revealed-panel" aria-live="polite">
+        <img id="generated-outcome" alt="Generated Outcome" data-loading="true">
+        <p class="meta" id="outcome-metadata"></p>
+        <p class="note" id="reveal-note"></p>
+        <button id="reset-button" type="button">Reset</button>
+      </section>
+
+      <section class="panel" data-state="generation-failure" id="generation-failure-panel" aria-live="assertive">
+        <div class="stage" aria-label="Generation Failure">
+          <div>
+            <h1 class="failure-title">Generation Failure</h1>
+            <p class="note" id="generation-failure-message"></p>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="retry-button" type="button">Retry</button>
+          <button id="failure-reset-button" type="button">Reset</button>
+        </div>
+      </section>
+    </div>
   </main>
 
   <script>
@@ -396,6 +641,7 @@ _BROWSER_UI_HTML = """<!doctype html>
     function resetToSealed() {
       clearProgressiveWaiting();
       generatedOutcome.removeAttribute("src");
+      generatedOutcome.dataset.loading = "true";
       outcomeMetadata.textContent = "";
       revealNote.textContent = "";
       generationFailureMessage.textContent = "";
@@ -445,11 +691,22 @@ _BROWSER_UI_HTML = """<!doctype html>
         return;
       }
 
-      generatedOutcome.src = `/api/generated-outcome?imageRef=${encodeURIComponent(observation.imageRef)}`;
+      generatedOutcome.dataset.loading = "true";
       outcomeMetadata.textContent = `Outcome: ${observation.outcome}`;
       revealNote.textContent = observation.revealNote;
-      clearProgressiveWaiting();
-      show(revealedPanel);
+      generatedOutcome.onload = () => {
+        generatedOutcome.dataset.loading = "false";
+        clearProgressiveWaiting();
+        show(revealedPanel);
+      };
+      generatedOutcome.onerror = () => {
+        showGenerationFailure({
+          error: {
+            message: "The generated outcome file could not be displayed.",
+          },
+        });
+      };
+      generatedOutcome.src = `/api/generated-outcome?imageRef=${encodeURIComponent(observation.imageRef)}`;
     }
 
     observeButton.addEventListener("click", observe);

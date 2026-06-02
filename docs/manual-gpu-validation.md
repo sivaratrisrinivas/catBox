@@ -88,6 +88,10 @@ Expected response:
 Compare each forced outcome's `metadata.generationSeconds` against the under 23
 seconds Primary Runtime Target after readiness.
 
+The current preferred SD Turbo settings are outcome-specific: the Living-Cat
+Outcome should use 384px image-to-image generation with 4 steps, and the
+Absent-Cat Outcome should use 512px image-to-image generation with 2 steps.
+
 ## Ephemeral Generated Outcomes
 
 Generated files are written under:
