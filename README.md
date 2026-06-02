@@ -1,3 +1,9 @@
+---
+title: Catbox
+sdk: docker
+app_port: 7860
+---
+
 # catBox
 
 Catbox is an interactive image-generation demo. You open a sealed box, a local
@@ -155,3 +161,29 @@ For the complete first-observation GPU validation checklist, including Browser
 UI readiness, normal observation, forced Dev Controls outcomes, runtime timing,
 ephemeral output files, and failure retry/reset behavior, see
 `docs/manual-gpu-validation.md`.
+
+## Deploy on Hugging Face Spaces
+
+The preferred public deployment target is a Docker Hugging Face Space with GPU
+hardware. The container serves Catbox on port `7860`, which is the default
+external port for Spaces.
+
+Create a new Hugging Face Space with these settings:
+
+- SDK: Docker
+- Visibility: Public or Protected
+- Hardware: start with `1x Nvidia L4`; use `Nvidia A10G - small` if L4 is too
+  slow or unavailable
+
+Add a Space secret named `HF_TOKEN` if the model download requires
+authenticated Hugging Face access.
+
+Push this repository's contents to the Space git remote. The Space README
+metadata at the top of this file tells Hugging Face to build the Docker image
+and expose port `7860`. The Space will start `python -m catbox.browser_ui`,
+download `sd-turbo` on first startup if it is not already cached, and serve the
+app from the Space URL.
+
+Generated outcomes and Captured Denoising Trace frames are still ephemeral in
+the deployed container. They are written under `.runtime/generated-outcomes` and
+may be lost when the Space restarts.
