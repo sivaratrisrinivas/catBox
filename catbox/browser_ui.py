@@ -202,8 +202,10 @@ _BROWSER_UI_HTML = """<!doctype html>
       --faint: rgba(244, 234, 214, 0.18);
       --brass: #d2a460;
       --cyan: #75d6ce;
+      --leaf: #7fbd8a;
       --red: #e16652;
       --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+      --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
       font-family: "Georgia", "Times New Roman", serif;
       background: var(--void);
       color: var(--ink);
@@ -225,7 +227,7 @@ _BROWSER_UI_HTML = """<!doctype html>
       background:
         linear-gradient(rgba(244, 234, 214, 0.028) 1px, transparent 1px),
         linear-gradient(90deg, rgba(244, 234, 214, 0.026) 1px, transparent 1px),
-        linear-gradient(135deg, #090a09 0%, #15120d 48%, #050606 100%);
+        linear-gradient(135deg, #080908 0%, #11180f 46%, #050606 100%);
       background-size: 44px 44px, 44px 44px, auto;
     }
 
@@ -281,13 +283,16 @@ _BROWSER_UI_HTML = """<!doctype html>
       opacity: 0;
       pointer-events: none;
       transition:
-        opacity 180ms var(--ease-out);
+        opacity 180ms var(--ease-out),
+        transform 220ms var(--ease-out);
+      transform: translateY(8px);
     }
 
     .panel.is-active {
       display: grid;
       opacity: 1;
       pointer-events: auto;
+      transform: translateY(0);
     }
 
     .stage {
@@ -297,6 +302,13 @@ _BROWSER_UI_HTML = """<!doctype html>
       display: grid;
       place-items: center;
       overflow: hidden;
+    }
+
+    .stage-stack {
+      width: 100%;
+      display: grid;
+      place-items: center;
+      gap: 14px;
     }
 
     .box {
@@ -352,22 +364,56 @@ _BROWSER_UI_HTML = """<!doctype html>
 
     .trace-surface,
     .outcome-surface {
-      width: min(88vw, 58svh, 620px);
       aspect-ratio: 1;
       position: relative;
       display: grid;
       place-items: center;
+      border: 1px solid rgba(244, 234, 214, 0.1);
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.045), transparent 34%),
+        rgba(7, 8, 7, 0.5);
+      box-shadow:
+        0 34px 80px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+
+    .trace-surface {
+      width: min(86vw, 52svh, 540px);
+    }
+
+    .outcome-surface {
+      width: min(94vw, 70svh, 760px);
+      border-color: rgba(244, 234, 214, 0.18);
+      box-shadow:
+        0 44px 110px rgba(0, 0, 0, 0.54),
+        0 0 0 1px rgba(117, 214, 206, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
     }
 
     .trace-surface::before,
     .outcome-surface::before {
       content: "";
       position: absolute;
-      inset: -16px;
+      inset: 12px;
       border-top: 1px solid rgba(210, 164, 96, 0.48);
       border-left: 1px solid rgba(117, 214, 206, 0.34);
       border-right: 1px solid rgba(244, 234, 214, 0.1);
+      border-bottom: 1px solid rgba(127, 189, 138, 0.24);
       pointer-events: none;
+      z-index: 2;
+    }
+
+    .trace-surface::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, transparent 0 48%, rgba(117, 214, 206, 0.18) 49% 50%, transparent 51% 100%),
+        linear-gradient(transparent 0 48%, rgba(117, 214, 206, 0.12) 49% 50%, transparent 51% 100%);
+      opacity: 0.32;
+      pointer-events: none;
+      z-index: 2;
     }
 
     .trace-placeholder {
@@ -395,7 +441,7 @@ _BROWSER_UI_HTML = """<!doctype html>
       filter: contrast(1.02);
       transition:
         opacity 220ms var(--ease-out),
-        transform 260ms var(--ease-out),
+        transform 260ms var(--ease-in-out),
         filter 260ms var(--ease-out);
     }
 
@@ -411,11 +457,34 @@ _BROWSER_UI_HTML = """<!doctype html>
       z-index: 1;
       image-rendering: auto;
       mix-blend-mode: screen;
+      opacity: 0.88;
+      filter: contrast(1.08) saturate(0.9);
     }
 
     #generated-outcome {
       position: relative;
       z-index: 1;
+    }
+
+    .trace-caption {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: rgba(244, 234, 214, 0.72);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.72rem;
+      line-height: 1.4;
+      text-transform: uppercase;
+    }
+
+    .trace-caption::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--leaf);
+      box-shadow: 0 0 16px rgba(127, 189, 138, 0.72);
     }
 
     .hud {
@@ -473,11 +542,17 @@ _BROWSER_UI_HTML = """<!doctype html>
         transform 140ms var(--ease-out),
         background-color 180ms ease,
         border-color 180ms ease,
+        box-shadow 180ms ease,
         opacity 180ms ease;
     }
 
     button:active {
       transform: scale(0.97);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 4px;
     }
 
     button:disabled {
@@ -495,6 +570,7 @@ _BROWSER_UI_HTML = """<!doctype html>
       button:not(:disabled):hover {
         transform: translateY(-1px);
         border-color: rgba(117, 214, 206, 0.7);
+        box-shadow: 0 22px 48px rgba(0, 0, 0, 0.42);
       }
 
       button:not(:disabled):hover:active {
@@ -561,6 +637,10 @@ _BROWSER_UI_HTML = """<!doctype html>
         width: min(94vw, 50svh, 480px);
       }
 
+      .outcome-surface {
+        width: min(96vw, 58svh, 560px);
+      }
+
       .panel {
         min-height: clamp(280px, calc(100svh - 250px), 560px);
       }
@@ -579,6 +659,10 @@ _BROWSER_UI_HTML = """<!doctype html>
 
       img[data-loading="true"] {
         filter: none;
+      }
+
+      .panel {
+        transform: none;
       }
     }
   </style>
@@ -605,9 +689,12 @@ _BROWSER_UI_HTML = """<!doctype html>
 
       <section class="panel" data-state="waiting" id="waiting-panel" aria-live="polite">
         <div class="stage" aria-label="Captured Denoising Trace">
-          <div class="trace-surface">
-            <div class="trace-placeholder" id="trace-placeholder"></div>
-            <img id="trace-frame" alt="Captured Denoising Trace frame" data-empty="true">
+          <div class="stage-stack">
+            <div class="trace-surface">
+              <div class="trace-placeholder" id="trace-placeholder"></div>
+              <img id="trace-frame" alt="Captured Denoising Trace frame" data-empty="true">
+            </div>
+            <p class="trace-caption" id="trace-caption">Awaiting captured model frame</p>
           </div>
         </div>
       </section>
@@ -659,6 +746,7 @@ _BROWSER_UI_HTML = """<!doctype html>
     const generatedOutcome = document.querySelector("#generated-outcome");
     const traceFrame = document.querySelector("#trace-frame");
     const tracePlaceholder = document.querySelector("#trace-placeholder");
+    const traceCaption = document.querySelector("#trace-caption");
     const revealNote = document.querySelector("#reveal-note");
     const outcomeMetadata = document.querySelector("#outcome-metadata");
     const systemStatus = document.querySelector("#system-status");
@@ -726,6 +814,15 @@ _BROWSER_UI_HTML = """<!doctype html>
       traceFrame.removeAttribute("src");
       traceFrame.dataset.empty = "true";
       tracePlaceholder.hidden = false;
+      traceCaption.textContent = "Awaiting captured model frame";
+    }
+
+    function showTraceFrame(imageRef, frameCount) {
+      lastTraceRef = imageRef;
+      traceFrame.dataset.empty = "false";
+      tracePlaceholder.hidden = true;
+      traceCaption.textContent = `Captured frame ${frameCount}`;
+      traceFrame.src = `/api/generated-outcome?imageRef=${encodeURIComponent(imageRef)}`;
     }
 
     async function pollTrace() {
@@ -735,10 +832,7 @@ _BROWSER_UI_HTML = """<!doctype html>
         const frames = Array.isArray(payload.traceRefs) ? payload.traceRefs : [];
         const latest = frames[frames.length - 1];
         if (latest && latest !== lastTraceRef) {
-          lastTraceRef = latest;
-          traceFrame.dataset.empty = "false";
-          tracePlaceholder.hidden = true;
-          traceFrame.src = `/api/generated-outcome?imageRef=${encodeURIComponent(latest)}`;
+          showTraceFrame(latest, frames.length);
           systemStatus.textContent = `Captured Denoising Trace frame ${frames.length}`;
         }
       } catch (error) {
@@ -835,6 +929,10 @@ _BROWSER_UI_HTML = """<!doctype html>
       generatedOutcome.dataset.loading = "true";
       const outcomeLabel = observation.outcome === "living" ? "Living Cat" : "Dead Cat";
       const frameCount = observation.metadata.traceFrameCount || observation.traceRefs.length;
+      const finalTraceRef = observation.traceRefs[observation.traceRefs.length - 1];
+      if (finalTraceRef && finalTraceRef !== lastTraceRef) {
+        showTraceFrame(finalTraceRef, frameCount);
+      }
       outcomeMetadata.textContent = `Branch: ${outcomeLabel} | Seed: ${observation.metadata.seed} | Trace frames: ${frameCount}`;
       revealNote.textContent = observation.revealNote;
       systemStatus.textContent = "Final Generated Outcome received from the Model Backend.";

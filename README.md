@@ -71,14 +71,17 @@ full-screen sealed-system interface rather than a card-based demo. It sends a
 normal observation request without choosing an outcome, polls for real Captured
 Denoising Trace frames while the Model Backend runs, and reveals the generated
 image only after the backend-provided local file reference has loaded.
-Observation Noise remains a fallback before the first captured frame appears.
-The Browser UI keeps each state in normal document flow so the header, apparatus
-view, status text, and controls do not overlap. When the generated outcome
-loads, the page scrolls the revealed apparatus into view so the image is visible
-inside the viewport. The Browser UI keeps the Model Backend authoritative, shows
-the Reveal Note, and supports Reset back to the sealed box. If generation fails,
-the Browser UI shows Generation Failure with Retry and Reset instead of
-registering or serving a fake generated image.
+Observation Noise remains a fallback before the first captured frame appears,
+and the trace surface is intentionally treated as a secondary instrument view
+instead of competing with the final Generated Outcome. The Browser UI keeps
+each state in normal document flow so the header, apparatus view, status text,
+and controls do not overlap. When the generated outcome loads, the page scrolls
+the revealed apparatus into view so the image is visible inside the viewport,
+with the final image presented as the dominant visual state. The Browser UI
+keeps the Model Backend authoritative, shows the Reveal Note, and supports Reset
+back to the sealed box. If generation fails, the Browser UI shows Generation
+Failure with Retry and Reset instead of registering or serving a fake generated
+image.
 
 ## How the project fits together
 
@@ -134,15 +137,16 @@ Then open `http://127.0.0.1:8765`. The page starts from the sealed box, sends a
 normal observation request to the Model Backend without choosing an outcome, and
 keeps backend startup separate from active observation. During observation it
 polls the trace endpoint and displays Captured Denoising Trace frames as they
-are registered by the Model Backend. It reveals a subtle Progressive Waiting
-status only if generation takes long enough, reveals the generated image from
-the returned local file reference, scrolls the revealed apparatus into view,
-shows the Reveal Note, and lets Reset return to the sealed box. The layout is
-vertically scrollable on small screens, and inactive states are removed from
-layout so they cannot cover the active state or controls. If generation fails,
-the Browser UI shows a Generation Failure state with Retry and Reset instead of
-substituting a static image or fake Generated Outcome. The first real run may
-download model files before the observation completes.
+are registered by the Model Backend, including a final-trace display from the
+completed observation response if polling misses the last frame. It reveals a
+subtle Progressive Waiting status only if generation takes long enough, reveals
+the generated image from the returned local file reference, scrolls the revealed
+apparatus into view, shows the Reveal Note, and lets Reset return to the sealed
+box. The layout is vertically scrollable on small screens, and inactive states
+are removed from layout so they cannot cover the active state or controls. If
+generation fails, the Browser UI shows a Generation Failure state with Retry and
+Reset instead of substituting a static image or fake Generated Outcome. The
+first real run may download model files before the observation completes.
 
 Manual GPU validation for the preferred GPU runtime:
 
