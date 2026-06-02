@@ -8,9 +8,15 @@ from catbox.browser_ui import BrowserUiApp
 
 
 class RecordingBackend:
-    def __init__(self, image_ref: str) -> None:
+    def __init__(self, image_ref: str, ready: bool = True) -> None:
         self.image_ref = image_ref
+        self.ready = ready
         self.observations = 0
+
+    def readiness(self):
+        if self.ready:
+            return {"status": "ready", "modelBackend": "ready"}
+        return {"status": "starting", "modelBackend": "starting"}
 
     def observe(self):
         self.observations += 1
@@ -26,6 +32,29 @@ class RecordingBackend:
         }
 
 
+class FailingBackend:
+    def __init__(self) -> None:
+        self.observations = 0
+
+    def readiness(self):
+        return {"status": "ready", "modelBackend": "ready"}
+
+    def observe(self):
+        self.observations += 1
+        return {
+            "status": "generation_failed",
+            "error": {
+                "type": "RuntimeError",
+                "message": "CUDA ran out of memory",
+            },
+            "metadata": {
+                "seed": 41100,
+                "outcome": "living",
+                "ephemeral": True,
+            },
+        }
+
+
 class BrowserUiServerTests(TestCase):
     def test_browser_page_renders_observation_flow_without_outcome_choice(self):
         backend = RecordingBackend("/tmp/generated.png")
@@ -37,14 +66,38 @@ class BrowserUiServerTests(TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(response.headers["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("data-state=\"sealed\"", html)
+        self.assertIn("data-state=\"starting\"", html)
+        self.assertIn("Preparing the model backend", html)
         self.assertIn("id=\"observe-button\"", html)
         self.assertIn("Observe", html)
         self.assertIn("data-state=\"waiting\"", html)
         self.assertIn("Observation noise", html)
+        self.assertIn("id=\"progressive-waiting-status\"", html)
+        self.assertIn("hidden", html)
+        self.assertIn("PROGRESSIVE_WAITING_DELAY_MS", html)
+        self.assertIn("showProgressiveWaiting", html)
         self.assertIn("id=\"generated-outcome\"", html)
         self.assertIn("id=\"reveal-note\"", html)
         self.assertIn("id=\"reset-button\"", html)
+        self.assertIn("data-state=\"generation-failure\"", html)
+        self.assertIn("id=\"generation-failure-message\"", html)
+        self.assertIn("id=\"retry-button\"", html)
+        self.assertIn("id=\"failure-reset-button\"", html)
+        self.assertIn("retryButton.addEventListener(\"click\", observe)", html)
+        self.assertIn("failureResetButton.addEventListener(\"click\", resetToSealed)", html)
+        self.assertIn("generationFailureMessage.textContent = \"\"", html)
         self.assertNotIn("name=\"outcome\"", html)
+
+    def test_readiness_endpoint_returns_backend_startup_state(self):
+        backend = RecordingBackend("/tmp/generated.png", ready=False)
+        app = BrowserUiApp(backend=backend)
+
+        response = app.handle("GET", "/api/readiness")
+        payload = json.loads(response.body.decode("utf-8"))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        self.assertEqual(payload, {"status": "starting", "modelBackend": "starting"})
 
     def test_normal_observation_returns_backend_contract_and_serves_generated_file(self):
         with TemporaryDirectory() as runtime_dir:
@@ -72,3 +125,24 @@ class BrowserUiServerTests(TestCase):
             self.assertEqual(image_response.status, 200)
             self.assertEqual(image_response.body, b"generated image")
             self.assertEqual(image_response.headers["Content-Type"], "image/png")
+
+    def test_generation_failure_returns_structured_failure_without_generated_image(self):
+        backend = FailingBackend()
+        app = BrowserUiApp(backend=backend)
+
+        observe_response = app.handle("POST", "/api/observe")
+        payload = json.loads(observe_response.body.decode("utf-8"))
+
+        self.assertEqual(observe_response.status, 200)
+        self.assertEqual(observe_response.headers["Content-Type"], "application/json")
+        self.assertEqual(backend.observations, 1)
+        self.assertEqual(payload["status"], "generation_failed")
+        self.assertEqual(payload["error"]["type"], "RuntimeError")
+        self.assertIn("CUDA", payload["error"]["message"])
+        self.assertNotIn("imageRef", payload)
+
+        image_response = app.handle(
+            "GET",
+            "/api/generated-outcome?imageRef=/tmp/not-generated.png",
+        )
+        self.assertEqual(image_response.status, 404)

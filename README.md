@@ -64,10 +64,14 @@ python -m catbox.browser_ui
 ```
 
 Then open `http://127.0.0.1:8765`. The page starts from the sealed box, sends a
-normal observation request to the Model Backend without choosing an outcome,
-shows a minimal waiting state, reveals the generated image from the returned
+normal observation request to the Model Backend without choosing an outcome, and
+keeps backend startup separate from active observation. During observation it
+shows Observation Noise first, reveals a subtle Progressive Waiting status only
+if generation takes long enough, reveals the generated image from the returned
 local file reference, shows the Reveal Note, and lets Reset return to the sealed
-box. The first real run may download model files before the observation
+box. If generation fails, the Browser UI shows a Generation Failure state with
+Retry and Reset instead of substituting a static image or fake Generated
+Outcome. The first real run may download model files before the observation
 completes.
 
 Manual GPU validation for the preferred local machine:

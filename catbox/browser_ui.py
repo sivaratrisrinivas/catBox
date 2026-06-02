@@ -13,6 +13,8 @@ from catbox.sd_turbo_runner import DEFAULT_RUNTIME_DIR, SdTurboImageToImageModel
 
 
 class BrowserBackend(Protocol):
+    def readiness(self) -> dict[str, str]: ...
+
     def observe(self) -> dict[str, object]: ...
 
 
@@ -37,6 +39,8 @@ class BrowserUiApp:
         parsed = urlparse(path)
         if method == "GET" and parsed.path == "/":
             return self._page()
+        if method == "GET" and parsed.path == "/api/readiness":
+            return self._readiness()
         if method == "POST" and parsed.path == "/api/observe":
             return self._observe()
         if method == "GET" and parsed.path == "/api/generated-outcome":
@@ -48,6 +52,14 @@ class BrowserUiApp:
             200,
             _BROWSER_UI_HTML.encode("utf-8"),
             {"Content-Type": "text/html; charset=utf-8"},
+        )
+
+    def _readiness(self) -> BrowserUiResponse:
+        response_bytes = json.dumps(self._backend.readiness()).encode("utf-8")
+        return BrowserUiResponse(
+            200,
+            response_bytes,
+            {"Content-Type": "application/json"},
         )
 
     def _observe(self) -> BrowserUiResponse:
@@ -235,6 +247,13 @@ _BROWSER_UI_HTML = """<!doctype html>
       cursor: progress;
     }
 
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+    }
+
     .noise {
       width: min(72vw, 420px);
       aspect-ratio: 1.4;
@@ -265,11 +284,24 @@ _BROWSER_UI_HTML = """<!doctype html>
       line-height: 1.55;
       color: rgba(245, 240, 232, 0.76);
     }
+
+    .failure-title {
+      margin: 0;
+      font-size: clamp(1.35rem, 5vw, 2rem);
+      line-height: 1.1;
+    }
   </style>
 </head>
 <body>
   <main>
-    <section class="panel is-active" data-state="sealed" id="sealed-panel" aria-live="polite">
+    <section class="panel is-active" data-state="starting" id="starting-panel" aria-live="polite">
+      <div class="stage" aria-label="Catbox model backend startup">
+        <div class="box"></div>
+      </div>
+      <p class="note">Preparing the model backend</p>
+    </section>
+
+    <section class="panel" data-state="sealed" id="sealed-panel" aria-live="polite">
       <div class="stage" aria-label="A sealed Catbox">
         <div class="box"></div>
       </div>
@@ -279,6 +311,7 @@ _BROWSER_UI_HTML = """<!doctype html>
     <section class="panel" data-state="waiting" id="waiting-panel" aria-live="polite">
       <div class="noise" aria-hidden="true"></div>
       <p class="note">Observation noise</p>
+      <p class="note" id="progressive-waiting-status" hidden>The model backend is still generating this observation.</p>
     </section>
 
     <section class="panel" data-state="revealed" id="revealed-panel" aria-live="polite">
@@ -287,47 +320,144 @@ _BROWSER_UI_HTML = """<!doctype html>
       <p class="note" id="reveal-note"></p>
       <button id="reset-button" type="button">Reset</button>
     </section>
+
+    <section class="panel" data-state="generation-failure" id="generation-failure-panel" aria-live="assertive">
+      <div class="stage" aria-label="Generation Failure">
+        <div>
+          <h1 class="failure-title">Generation Failure</h1>
+          <p class="note" id="generation-failure-message"></p>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="retry-button" type="button">Retry</button>
+        <button id="failure-reset-button" type="button">Reset</button>
+      </div>
+    </section>
   </main>
 
   <script>
+    const startingPanel = document.querySelector("#starting-panel");
     const sealedPanel = document.querySelector("#sealed-panel");
     const waitingPanel = document.querySelector("#waiting-panel");
     const revealedPanel = document.querySelector("#revealed-panel");
+    const generationFailurePanel = document.querySelector("#generation-failure-panel");
     const observeButton = document.querySelector("#observe-button");
     const resetButton = document.querySelector("#reset-button");
+    const retryButton = document.querySelector("#retry-button");
+    const failureResetButton = document.querySelector("#failure-reset-button");
     const generatedOutcome = document.querySelector("#generated-outcome");
     const revealNote = document.querySelector("#reveal-note");
     const outcomeMetadata = document.querySelector("#outcome-metadata");
+    const generationFailureMessage = document.querySelector("#generation-failure-message");
+    const progressiveWaitingStatus = document.querySelector("#progressive-waiting-status");
+    const PROGRESSIVE_WAITING_DELAY_MS = 4500;
+    let progressiveWaitingTimer = null;
 
     function show(panel) {
-      for (const candidate of [sealedPanel, waitingPanel, revealedPanel]) {
+      for (const candidate of [startingPanel, sealedPanel, waitingPanel, revealedPanel, generationFailurePanel]) {
         candidate.classList.toggle("is-active", candidate === panel);
       }
     }
 
-    observeButton.addEventListener("click", async () => {
-      observeButton.disabled = true;
-      show(waitingPanel);
+    function clearProgressiveWaiting() {
+      if (progressiveWaitingTimer !== null) {
+        window.clearTimeout(progressiveWaitingTimer);
+        progressiveWaitingTimer = null;
+      }
+      progressiveWaitingStatus.hidden = true;
+    }
 
-      const response = await fetch("/api/observe", { method: "POST" });
-      const observation = await response.json();
+    function showProgressiveWaiting() {
+      progressiveWaitingStatus.hidden = false;
+      progressiveWaitingTimer = null;
+    }
+
+    function startProgressiveWaitingTimer() {
+      clearProgressiveWaiting();
+      progressiveWaitingTimer = window.setTimeout(
+        showProgressiveWaiting,
+        PROGRESSIVE_WAITING_DELAY_MS
+      );
+    }
+
+    async function refreshReadiness() {
+      const response = await fetch("/api/readiness");
+      const readiness = await response.json();
+      if (readiness.status === "ready") {
+        observeButton.disabled = false;
+        show(sealedPanel);
+        return;
+      }
+      observeButton.disabled = true;
+      show(startingPanel);
+      window.setTimeout(refreshReadiness, 1200);
+    }
+
+    function resetToSealed() {
+      clearProgressiveWaiting();
+      generatedOutcome.removeAttribute("src");
+      outcomeMetadata.textContent = "";
+      revealNote.textContent = "";
+      generationFailureMessage.textContent = "";
+      observeButton.disabled = false;
+      retryButton.disabled = false;
+      show(sealedPanel);
+    }
+
+    function showGenerationFailure(observation) {
+      clearProgressiveWaiting();
+      const message = observation?.error?.message || "The model backend could not produce a Generated Outcome.";
+      generationFailureMessage.textContent = message;
+      observeButton.disabled = false;
+      retryButton.disabled = false;
+      show(generationFailurePanel);
+    }
+
+    async function observe() {
+      observeButton.disabled = true;
+      retryButton.disabled = true;
+      show(waitingPanel);
+      startProgressiveWaitingTimer();
+
+      let observation;
+      try {
+        const response = await fetch("/api/observe", { method: "POST" });
+        observation = await response.json();
+      } catch (error) {
+        showGenerationFailure({
+          error: {
+            message: "The model backend could not be reached.",
+          },
+        });
+        return;
+      }
+
+      if (observation.status === "generation_failed") {
+        showGenerationFailure(observation);
+        return;
+      }
       if (observation.status !== "generated") {
-        throw new Error(observation.error?.message || "Generation failed.");
+        showGenerationFailure({
+          error: {
+            message: "The model backend returned an unknown observation state.",
+          },
+        });
+        return;
       }
 
       generatedOutcome.src = `/api/generated-outcome?imageRef=${encodeURIComponent(observation.imageRef)}`;
       outcomeMetadata.textContent = `Outcome: ${observation.outcome}`;
       revealNote.textContent = observation.revealNote;
+      clearProgressiveWaiting();
       show(revealedPanel);
-    });
+    }
 
-    resetButton.addEventListener("click", () => {
-      generatedOutcome.removeAttribute("src");
-      outcomeMetadata.textContent = "";
-      revealNote.textContent = "";
-      observeButton.disabled = false;
-      show(sealedPanel);
-    });
+    observeButton.addEventListener("click", observe);
+    retryButton.addEventListener("click", observe);
+    resetButton.addEventListener("click", resetToSealed);
+    failureResetButton.addEventListener("click", resetToSealed);
+
+    refreshReadiness();
   </script>
 </body>
 </html>
