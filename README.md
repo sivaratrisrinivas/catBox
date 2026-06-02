@@ -90,7 +90,8 @@ registering or serving a fake generated image.
   observation requests, trace polling, generated image serving, Progressive
   Waiting, Generation Failure, Retry, and Reset.
 - `catbox/validate_sd_turbo_runner.py` is the manual Dev Controls validation
-  entrypoint for forcing outcomes on the local machine.
+  entrypoint for forcing outcomes and running Outcome Visibility tuning on the
+  target GPU runtime.
 - `tests/` covers the public backend, runner, Browser UI, and manual validation
   documentation contracts with fakes and stubs instead of requiring GPU access.
 - `docs/adr/` records the project decisions that keep the Browser UI thin, the
@@ -143,7 +144,7 @@ the Browser UI shows a Generation Failure state with Retry and Reset instead of
 substituting a static image or fake Generated Outcome. The first real run may
 download model files before the observation completes.
 
-Manual GPU validation for the preferred local machine:
+Manual GPU validation for the preferred GPU runtime:
 
 ```bash
 uv run python -m catbox.validate_sd_turbo_runner --outcome all --seed 41100
@@ -153,9 +154,25 @@ That command preloads SD Turbo once, forces both Catbox outcomes through the
 development-only path, writes ephemeral generated images under `.runtime/`, and
 prints the same response shape the Browser UI will use.
 
-The current preferred settings were manually validated on the local CUDA path:
-the Living-Cat Outcome uses 384px image-to-image generation with 4 steps, and
-the Dead-Cat Outcome uses 512px image-to-image generation with 2 steps.
+To test one explicit tuning candidate, pass generation settings through Dev
+Controls:
+
+```bash
+uv run python -m catbox.validate_sd_turbo_runner --outcome dead --seed 41100 --steps 6 --strength 0.7 --width 512 --height 512
+```
+
+To run the first Outcome Visibility matrix on the deployed GPU runtime:
+
+```bash
+uv run python -m catbox.validate_sd_turbo_runner --matrix --seed 41100
+```
+
+The default matrix tries both outcomes with steps `4,6,8`, sizes `512,768`,
+Living-Cat Outcome strengths `0.75,0.8,0.85`, and Dead-Cat Outcome strengths
+`0.6,0.7,0.8`. Choose the fastest passing candidate where both final Generated
+Outcomes are immediately recognizable, the Dead-Cat Outcome remains
+non-graphic, the shared Box Composition is still legible, and
+`metadata.generationSeconds` stays under the Primary Runtime Target.
 
 For the complete first-observation GPU validation checklist, including Browser
 UI readiness, normal observation, forced Dev Controls outcomes, runtime timing,

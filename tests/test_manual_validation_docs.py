@@ -16,6 +16,7 @@ class ManualValidationDocumentationTests(TestCase):
         self.assertIn("http://127.0.0.1:8765", guide)
         self.assertIn("POST /api/observe", guide)
         self.assertIn("python -m catbox.validate_sd_turbo_runner --outcome all --seed 41100", guide)
+        self.assertIn("python -m catbox.validate_sd_turbo_runner --matrix", guide)
         self.assertIn("Primary Runtime Target", guide)
         self.assertIn("under 23 seconds", guide)
         self.assertIn(".runtime/generated-outcomes", guide)

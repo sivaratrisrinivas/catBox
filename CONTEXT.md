@@ -40,6 +40,10 @@ _Avoid_: Saved image, collectible, generation history
 A generated outcome that a viewer can immediately identify as either a living cat in a box or a non-graphic dead cat in a box, even if the image is low-resolution or visually imperfect.
 _Avoid_: Polished output, perfect image, abstract result
 
+**Outcome Visibility**:
+The requirement that each final Generated Outcome is large and clear enough on screen for a viewer to immediately recognize the selected outcome without zooming or inspecting technical metadata.
+_Avoid_: Trace visibility, image polish, gallery presentation
+
 **Box Composition**:
 The shared source image or sketch that anchors every Catbox generation around the same box scene before it becomes a living-cat outcome or dead-cat outcome.
 _Avoid_: Input image, starter image, base asset
@@ -110,6 +114,10 @@ _Avoid_: Frontend, webpage, client
 
 **Domain expert**: Catbox uses the Model Fallback Ladder, but every accepted path must still create a real Generated Outcome.
 
+**Developer**: Should Catbox change models to improve Outcome Visibility?
+
+**Domain expert**: Not before a focused tuning pass on the current preferred model path. A stronger model path should be considered only if the preferred path cannot make both outcomes recognizable within the Primary Runtime Target.
+
 **Developer**: Does the visual noise have to be real model denoising?
 
 **Domain expert**: Catbox should show a Captured Denoising Trace when the Model Backend can capture real intermediate frames. Observation Noise is only the fallback before the first captured frame appears.
@@ -126,6 +134,14 @@ _Avoid_: Frontend, webpage, client
 
 **Domain expert**: The Primary Runtime Target is under 23 seconds for a Recognizable Outcome.
 
+**Developer**: Which environment decides whether v1 outcome quality and runtime pass?
+
+**Domain expert**: The deployed GPU runtime is the validation environment for v1 Outcome Visibility and the Primary Runtime Target. Local weak hardware is useful for development checks, but it should not block image-quality decisions.
+
+**Developer**: Can Catbox trade much slower generation for a clearer final image?
+
+**Domain expert**: Not for the v1 core experience. Outcome Visibility should improve within the Primary Runtime Target unless a separate slower mode is explicitly defined.
+
 **Developer**: When should Catbox explain diffusion?
 
 **Domain expert**: Catbox should show a Reveal Note after the Generated Outcome appears, with optional technical details kept out of the main flow.
@@ -133,6 +149,10 @@ _Avoid_: Frontend, webpage, client
 **Developer**: How good does the generated image need to be?
 
 **Domain expert**: It needs to be a Recognizable Outcome. Catbox should prefer clear identity over polished image quality in v1.
+
+**Developer**: Do both outcomes need the same model settings?
+
+**Domain expert**: No. Living-Cat Outcomes and Dead-Cat Outcomes share the same Outcome Visibility standard, but their Outcome Prompts and tuning can differ when needed to make each outcome recognizable.
 
 **Developer**: Does Catbox preserve generated images?
 
@@ -145,6 +165,14 @@ _Avoid_: Frontend, webpage, client
 **Developer**: Can users tune Catbox generation?
 
 **Domain expert**: Not in the normal experience. Tuning belongs in Dev Controls, while users only observe and reset.
+
+**Developer**: Where should Outcome Visibility tuning happen?
+
+**Domain expert**: Outcome Visibility tuning belongs in Dev Controls and validation workflows, not in the normal observation experience.
+
+**Developer**: Should Catbox tune trace frames before the final image?
+
+**Domain expert**: No. Tune final Generated Outcome recognizability first, then improve Captured Denoising Trace clarity only after both outcomes pass the Outcome Visibility standard.
 
 **Developer**: Are prompts part of the public experience?
 

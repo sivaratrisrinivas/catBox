@@ -90,6 +90,26 @@ uv run python -m catbox.validate_sd_turbo_runner --outcome living --seed 41100
 uv run python -m catbox.validate_sd_turbo_runner --outcome dead --seed 41100
 ```
 
+To validate one explicit tuning candidate:
+
+```bash
+uv run python -m catbox.validate_sd_turbo_runner --outcome dead --seed 41100 --steps 6 --strength 0.7 --width 512 --height 512
+```
+
+To run the first Outcome Visibility matrix on the deployed GPU runtime:
+
+```bash
+uv run python -m catbox.validate_sd_turbo_runner --matrix --seed 41100
+```
+
+The default matrix tries both outcomes with steps `4,6,8`, sizes `512,768`,
+Living-Cat Outcome strengths `0.75,0.8,0.85`, and Dead-Cat Outcome strengths
+`0.6,0.7,0.8`. These values can be narrowed for a smaller run:
+
+```bash
+uv run python -m catbox.validate_sd_turbo_runner --matrix --seed 41100 --matrix-steps 4,6 --matrix-sizes 512 --living-strengths 0.75 --dead-strengths 0.6,0.7
+```
+
 Expected response:
 
 - The first entry reports backend readiness.
@@ -102,9 +122,16 @@ Expected response:
 Compare each forced outcome's `metadata.generationSeconds` against the under 23
 seconds Primary Runtime Target after readiness.
 
-The current preferred SD Turbo settings are outcome-specific: the Living-Cat
-Outcome should use 384px image-to-image generation with 4 steps, and the
-Dead-Cat Outcome should use 512px image-to-image generation with 2 steps.
+A matrix candidate passes when the final Living-Cat Outcome is immediately
+recognizable, the final Dead-Cat Outcome is immediately recognizable and
+non-graphic, both still feel anchored to the shared Box Composition, and
+`metadata.generationSeconds` stays under the Primary Runtime Target. Prefer the
+fastest passing candidate; if timings are close, choose the candidate with
+clearer outcome identity.
+
+The current preferred SD Turbo settings are outcome-specific and may be changed
+through Dev Controls during validation. Outcome Visibility uses one shared
+standard for both outcomes, but each outcome may use different tuning values.
 
 ## Ephemeral Generated Outcomes
 
