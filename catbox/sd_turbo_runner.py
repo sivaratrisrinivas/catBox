@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from catbox.model_backend import Outcome
+from catbox.model_backend import Outcome, TraceFrameCallback
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,11 +31,11 @@ class SdTurboImageToImageConfig:
 PROMPTS: dict[Outcome, str] = {
     "living": (
         "cozy living cat curled inside the same open cardboard box, warm soft light, "
-        "gentle illustrated realism, clear cat in box, charming but not cartoonish"
+        "photoreal lab instant photo, clear cat in box, charming but not cartoonish"
     ),
-    "absent": (
-        "same open cardboard box but completely empty, small red collar and toy mouse inside, "
-        "vacant interior, no animal present, eerie gentle atmosphere, no gore"
+    "dead": (
+        "same open cardboard box with a motionless deceased cat lying inside, closed eyes, "
+        "no blood, no wounds, no gore, uncanny Schrodinger experiment photograph, clinical lab light"
     ),
 }
 
@@ -46,14 +46,12 @@ BASE_NEGATIVE_PROMPT = (
 
 NEGATIVE_PROMPTS: dict[Outcome, str] = {
     "living": BASE_NEGATIVE_PROMPT,
-    "absent": (
-        f"{BASE_NEGATIVE_PROMPT}, cat, kitten, animal, pet, fur, ears, tail, whiskers, eyes, face"
-    ),
+    "dead": f"{BASE_NEGATIVE_PROMPT}, blood, wound, gore, exposed injury, mutilation",
 }
 
 OUTCOME_DEFAULTS: dict[Outcome, dict[str, object]] = {
     "living": {"steps": 4, "strength": 0.8, "width": 384, "height": 384},
-    "absent": {"steps": 2, "strength": 0.55},
+    "dead": {"steps": 2, "strength": 0.55},
 }
 
 GENERATION_CONFIG_FIELDS = {"steps", "strength", "guidance_scale", "width", "height"}
@@ -100,6 +98,7 @@ class SdTurboImageToImageModelRunner:
         outcome: Outcome,
         seed: int,
         config: dict[str, object] | None = None,
+        trace_callback: TraceFrameCallback | None = None,
     ) -> dict[str, object]:
         if not self.is_ready():
             message = "SD Turbo image-to-image runner is not ready."
@@ -126,8 +125,26 @@ class SdTurboImageToImageModelRunner:
             call_kwargs["negative_prompt"] = NEGATIVE_PROMPTS[outcome]
 
         started_at = self._now()
+        trace_refs: list[str] = []
+        if trace_callback is not None:
+            trace_kwargs, trace_refs = self._trace_callback_kwargs(
+                started_at=started_at,
+                outcome=outcome,
+                seed=seed,
+                notify=trace_callback,
+            )
+            call_kwargs.update(trace_kwargs)
+
         generation_start = self._timer()
-        result = self._pipeline(**call_kwargs)
+        try:
+            result = self._pipeline(**call_kwargs)
+        except TypeError as error:
+            if trace_callback is None or "callback_on_step_end" not in str(error):
+                raise
+            call_kwargs.pop("callback_on_step_end", None)
+            call_kwargs.pop("callback_on_step_end_tensor_inputs", None)
+            trace_refs.clear()
+            result = self._pipeline(**call_kwargs)
         generation_seconds = round(self._timer() - generation_start, 3)
 
         self._runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -148,6 +165,7 @@ class SdTurboImageToImageModelRunner:
                 ),
                 "config": asdict(run_config),
             },
+            "trace_refs": trace_refs,
         }
 
     def _load_pipeline(self) -> object:
@@ -211,13 +229,68 @@ class SdTurboImageToImageModelRunner:
 
     @staticmethod
     def _output_filename(started_at: str, outcome: Outcome, seed: int) -> str:
+        return f"{SdTurboImageToImageModelRunner._output_stem(started_at, outcome, seed)}.png"
+
+    @staticmethod
+    def _output_stem(started_at: str, outcome: Outcome, seed: int) -> str:
         safe_started_at = (
             started_at.replace(":", "")
             .replace("-", "")
             .replace(".", "")
             .replace("+", "Z")
         )
-        return f"{safe_started_at}_{outcome}_{seed}.png"
+        return f"{safe_started_at}_{outcome}_{seed}"
+
+    def _trace_callback_kwargs(
+        self,
+        started_at: str,
+        outcome: Outcome,
+        seed: int,
+        notify: TraceFrameCallback,
+    ) -> tuple[dict[str, object], list[str]]:
+        trace_dir = (
+            self._runtime_dir
+            / "denoising-traces"
+            / self._output_stem(started_at, outcome, seed)
+        )
+        trace_refs: list[str] = []
+
+        def capture_trace_frame(pipe: object, step: int, timestep: object, kwargs: dict[str, Any]) -> dict[str, Any]:
+            latents = kwargs.get("latents")
+            if latents is None:
+                return kwargs
+            try:
+                image = self._decode_trace_latents(pipe, latents)
+                trace_dir.mkdir(parents=True, exist_ok=True)
+                frame_path = trace_dir / f"{step + 1:02d}.png"
+                image.save(frame_path)
+                trace_ref = str(frame_path)
+                trace_refs.append(trace_ref)
+                notify(trace_ref)
+            except Exception:
+                return kwargs
+            return kwargs
+
+        return (
+            {
+                "callback_on_step_end": capture_trace_frame,
+                "callback_on_step_end_tensor_inputs": ["latents"],
+            },
+            trace_refs,
+        )
+
+    def _decode_trace_latents(self, pipe: object, latents: object) -> object:
+        if self._torch is None:
+            raise RuntimeError("Torch is not loaded.")
+        if not hasattr(pipe, "vae") or not hasattr(pipe, "image_processor"):
+            raise RuntimeError("Pipeline does not expose trace decoding helpers.")
+
+        vae = pipe.vae
+        image_processor = pipe.image_processor
+        scaling_factor = getattr(getattr(vae, "config", object()), "scaling_factor", 1.0)
+        with self._torch.no_grad():
+            decoded = vae.decode(latents.detach() / scaling_factor).sample
+        return image_processor.postprocess(decoded, output_type="pil")[0]
 
     @staticmethod
     def _load_torch() -> object:

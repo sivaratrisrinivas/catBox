@@ -2,14 +2,14 @@
 
 Catbox is an interactive image-generation demo. You open a sealed box, a local
 image model runs, and the box turns into either a cozy cat scene or an eerie
-empty-box scene.
+lifeless-cat scene.
 
 ## What this project is
 
 Catbox is a thin local product slice around a real image model. The user-facing
 experience is intentionally small: the Browser UI starts from a sealed box, the
 user observes it, and the local Model Backend generates one real Generated
-Outcome. The outcome is either a Living-Cat Outcome or an Absent-Cat Outcome.
+Outcome. The outcome is either a Living-Cat Outcome or a Dead-Cat Outcome.
 
 The project is not a static reveal, a canvas-only animation, a gallery, or a
 prompt playground. The normal path does not let the Browser UI choose the
@@ -19,15 +19,18 @@ validation and reproducibility.
 ## Why this exists
 
 The model spike showed that `sd_turbo_img2img` can create recognizable cat and
-empty-box images after the model is loaded. This backend turns that experiment
-into code the rest of Catbox can use:
+empty-box images after the model is loaded; Catbox now uses that same path for a
+living-cat branch and a non-graphic dead-cat branch. This backend turns that
+experiment into code the rest of Catbox can use:
 
 - the browser asks to observe the box instead of choosing the result itself;
 - the backend is the source of truth for which scene was chosen;
-- Dev Controls can force `living` or `absent` without changing normal
+- Dev Controls can force `living` or `dead` without changing normal
   observation behavior;
 - Dev Controls can pass a seed and generation settings to reproduce a run;
 - generated images are returned as local file paths plus details about the run;
+- real intermediate frames can be captured as a single-branch Captured
+  Denoising Trace when the runner supports it;
 - failures stay visible instead of being hidden behind placeholder images.
 
 Catbox v1 treats generated files as Ephemeral Outcomes. They may exist locally
@@ -40,8 +43,9 @@ The current code defines the small Python boundary that the Browser UI calls:
 
 - `readiness()` says whether the model backend is ready.
 - `observe()` is the normal path. The backend chooses which scene to generate.
-- `observe_with_dev_controls(...)` is for development only. It can force the cat
-  scene or the empty-box scene, and it can reuse a seed or generation settings.
+- `observe_with_dev_controls(...)` is for development only. It can force the
+  living-cat scene or the dead-cat scene, and it can reuse a seed or generation
+  settings.
 - Successful observations return the chosen scene, a local image file path,
   timing details, and a short note for the reveal.
 - Failed observations return a clear error instead of pretending that an image
@@ -56,16 +60,19 @@ contract.
 The fake runner is only for tests and early wiring. It lets the backend behavior
 be checked quickly without CUDA, model downloads, or slow image generation.
 
-The local Browser UI is served by `python -m catbox.browser_ui`. It starts from
-a sealed box, sends a normal observation request without choosing an outcome,
-waits while the Model Backend runs, and reveals the generated image only after
-the backend-provided local file reference has loaded. The Browser UI uses
-theatrical Observation Noise, Progressive Waiting, responsive press/hover
-states, reduced-motion handling, and a polished generated-image reveal while
-keeping the Model Backend authoritative. It shows the Reveal Note and supports
-Reset back to the sealed box. If generation fails, the Browser UI shows
-Generation Failure with Retry and Reset instead of registering or serving a fake
-generated image.
+The local Browser UI is served by `python -m catbox.browser_ui`. It is a
+full-screen sealed-system interface rather than a card-based demo. It sends a
+normal observation request without choosing an outcome, polls for real Captured
+Denoising Trace frames while the Model Backend runs, and reveals the generated
+image only after the backend-provided local file reference has loaded.
+Observation Noise remains a fallback before the first captured frame appears.
+The Browser UI keeps each state in normal document flow so the header, apparatus
+view, status text, and controls do not overlap. When the generated outcome
+loads, the page scrolls the revealed apparatus into view so the image is visible
+inside the viewport. The Browser UI keeps the Model Backend authoritative, shows
+the Reveal Note, and supports Reset back to the sealed box. If generation fails,
+the Browser UI shows Generation Failure with Retry and Reset instead of
+registering or serving a fake generated image.
 
 ## How the project fits together
 
@@ -74,8 +81,8 @@ generated image.
 - `catbox/sd_turbo_runner.py` owns the persistent SD Turbo image-to-image runner,
   prompt selection, generation settings, timing, and ephemeral file output.
 - `catbox/browser_ui.py` owns the local Browser UI, readiness polling, normal
-  observation requests, generated image serving, Progressive Waiting, Generation
-  Failure, Retry, and Reset.
+  observation requests, trace polling, generated image serving, Progressive
+  Waiting, Generation Failure, Retry, and Reset.
 - `catbox/validate_sd_turbo_runner.py` is the manual Dev Controls validation
   entrypoint for forcing outcomes on the local machine.
 - `tests/` covers the public backend, runner, Browser UI, and manual validation
@@ -119,13 +126,16 @@ uv run python -m catbox.browser_ui
 Then open `http://127.0.0.1:8765`. The page starts from the sealed box, sends a
 normal observation request to the Model Backend without choosing an outcome, and
 keeps backend startup separate from active observation. During observation it
-shows Observation Noise first, reveals a subtle Progressive Waiting status only
-if generation takes long enough, reveals the generated image from the returned
-local file reference, shows the Reveal Note, and lets Reset return to the sealed
-box. If generation fails, the Browser UI shows a Generation Failure state with
-Retry and Reset instead of substituting a static image or fake Generated
-Outcome. The first real run may download model files before the observation
-completes.
+polls the trace endpoint and displays Captured Denoising Trace frames as they
+are registered by the Model Backend. It reveals a subtle Progressive Waiting
+status only if generation takes long enough, reveals the generated image from
+the returned local file reference, scrolls the revealed apparatus into view,
+shows the Reveal Note, and lets Reset return to the sealed box. The layout is
+vertically scrollable on small screens, and inactive states are removed from
+layout so they cannot cover the active state or controls. If generation fails,
+the Browser UI shows a Generation Failure state with Retry and Reset instead of
+substituting a static image or fake Generated Outcome. The first real run may
+download model files before the observation completes.
 
 Manual GPU validation for the preferred local machine:
 
@@ -139,7 +149,7 @@ prints the same response shape the Browser UI will use.
 
 The current preferred settings were manually validated on the local CUDA path:
 the Living-Cat Outcome uses 384px image-to-image generation with 4 steps, and
-the Absent-Cat Outcome uses 512px image-to-image generation with 2 steps.
+the Dead-Cat Outcome uses 512px image-to-image generation with 2 steps.
 
 For the complete first-observation GPU validation checklist, including Browser
 UI readiness, normal observation, forced Dev Controls outcomes, runtime timing,

@@ -34,7 +34,7 @@ class ModelBackendTests(TestCase):
             response = backend.observe()
 
             self.assertEqual(response["status"], "generated")
-            self.assertIn(response["outcome"], {"living", "absent"})
+            self.assertIn(response["outcome"], {"living", "dead"})
             self.assertTrue(response["imageRef"].endswith(".png"))
             self.assertTrue(Path(response["imageRef"]).exists())
             self.assertEqual(response["metadata"]["seed"], 41100)
@@ -79,13 +79,13 @@ class ModelBackendTests(TestCase):
             backend = CatboxModelBackend(
                 model_runner=runner,
                 seed_source=lambda: 41100,
-                outcome_source=lambda: "absent",
+                outcome_source=lambda: "dead",
             )
 
             response = backend.observe()
 
             self.assertEqual(response["status"], "generated")
-            self.assertEqual(runner.generations, [{"outcome": "absent", "seed": 41100}])
+            self.assertEqual(runner.generations, [{"outcome": "dead", "seed": 41100}])
 
     def test_dev_controls_can_force_living_outcome(self):
         with TemporaryDirectory() as output_dir:
@@ -93,7 +93,7 @@ class ModelBackendTests(TestCase):
             backend = CatboxModelBackend(
                 model_runner=runner,
                 seed_source=lambda: 41100,
-                outcome_source=lambda: "absent",
+                outcome_source=lambda: "dead",
             )
 
             response = backend.observe_with_dev_controls({"outcome": "living"})
@@ -102,7 +102,7 @@ class ModelBackendTests(TestCase):
             self.assertEqual(response["outcome"], "living")
             self.assertEqual(runner.generations, [{"outcome": "living", "seed": 41100}])
 
-    def test_dev_controls_can_force_absent_outcome(self):
+    def test_dev_controls_can_force_dead_outcome(self):
         with TemporaryDirectory() as output_dir:
             runner = FakeModelRunner(output_dir=output_dir)
             backend = CatboxModelBackend(
@@ -111,11 +111,11 @@ class ModelBackendTests(TestCase):
                 outcome_source=lambda: "living",
             )
 
-            response = backend.observe_with_dev_controls({"outcome": "absent"})
+            response = backend.observe_with_dev_controls({"outcome": "dead"})
 
             self.assertEqual(response["status"], "generated")
-            self.assertEqual(response["outcome"], "absent")
-            self.assertEqual(runner.generations, [{"outcome": "absent", "seed": 41100}])
+            self.assertEqual(response["outcome"], "dead")
+            self.assertEqual(runner.generations, [{"outcome": "dead", "seed": 41100}])
 
     def test_dev_controls_can_override_seed_for_reproducible_observation(self):
         with TemporaryDirectory() as output_dir:
@@ -138,7 +138,7 @@ class ModelBackendTests(TestCase):
             backend = CatboxModelBackend(
                 model_runner=runner,
                 seed_source=lambda: 41100,
-                outcome_source=lambda: "absent",
+                outcome_source=lambda: "dead",
             )
 
             response = backend.observe_with_dev_controls(
@@ -154,7 +154,7 @@ class ModelBackendTests(TestCase):
                 runner.generations,
                 [
                     {
-                        "outcome": "absent",
+                        "outcome": "dead",
                         "seed": 41100,
                         "config": {"steps": 6, "strength": 0.55},
                     }
@@ -239,6 +239,40 @@ class StubPipeline:
         return type("PipelineResult", (), {"images": [self.generated_image]})()
 
 
+class StubTraceLatents:
+    def detach(self):
+        return self
+
+    def __truediv__(self, value):
+        return self
+
+
+class StubTraceVae:
+    config = type("VaeConfig", (), {"scaling_factor": 1.0})()
+
+    def decode(self, latents):
+        return type("Decoded", (), {"sample": "decoded image"})()
+
+
+class StubTraceImageProcessor:
+    def postprocess(self, decoded, output_type):
+        return [StubGeneratedImage()]
+
+
+class StubTracePipeline(StubPipeline):
+    def __init__(self) -> None:
+        super().__init__()
+        self.vae = StubTraceVae()
+        self.image_processor = StubTraceImageProcessor()
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        callback = kwargs.get("callback_on_step_end")
+        if callback is not None:
+            callback(self, 0, "timestep", {"latents": StubTraceLatents()})
+        return type("PipelineResult", (), {"images": [self.generated_image]})()
+
+
 class StubTorch:
     float16 = "float16"
     float32 = "float32"
@@ -256,6 +290,13 @@ class StubTorch:
         def manual_seed(self, seed):
             self.seed = seed
             return self
+
+    class no_grad:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
 
 
 class SdTurboRunnerTests(TestCase):
@@ -300,11 +341,15 @@ class SdTurboRunnerTests(TestCase):
     def test_backend_response_includes_real_runner_metadata(self):
         with TemporaryDirectory() as runtime_dir:
             pipeline = StubPipeline()
+            box_image_loads = []
 
             runner = SdTurboImageToImageModelRunner(
                 runtime_dir=runtime_dir,
                 pipeline_loader=lambda model_id, **kwargs: pipeline,
-                box_image_loader=lambda path, config: "box image",
+                box_image_loader=lambda path, config: box_image_loads.append(
+                    {"width": config.width, "height": config.height}
+                )
+                or "box image",
                 torch_module=StubTorch,
                 now=lambda: "2026-06-02T12:00:00Z",
                 timer=iter([20.0, 20.5]).__next__,
@@ -312,19 +357,54 @@ class SdTurboRunnerTests(TestCase):
             backend = CatboxModelBackend(
                 model_runner=runner,
                 seed_source=lambda: 41100,
-                outcome_source=lambda: "absent",
+                outcome_source=lambda: "dead",
                 clock=lambda: 123.0,
             )
 
             response = backend.observe()
 
             self.assertEqual(response["status"], "generated")
-            self.assertEqual(response["outcome"], "absent")
+            self.assertEqual(response["outcome"], "dead")
             self.assertTrue(Path(response["imageRef"]).exists())
             self.assertEqual(response["metadata"]["seed"], 41100)
             self.assertEqual(response["metadata"]["generationSeconds"], 0.5)
             self.assertEqual(response["metadata"]["runner"], "sd_turbo_img2img")
             self.assertEqual(response["metadata"]["device"], "cpu")
+            self.assertIn("deceased cat", pipeline.calls[0]["prompt"])
+            self.assertIn("no blood", pipeline.calls[0]["prompt"])
+            self.assertIn("no gore", pipeline.calls[0]["prompt"])
+            self.assertEqual(pipeline.calls[0]["num_inference_steps"], 2)
+            self.assertEqual(pipeline.calls[0]["strength"], 0.55)
+            self.assertEqual(box_image_loads, [{"width": 512, "height": 512}])
+
+    def test_real_runner_captures_selected_branch_trace_frames(self):
+        with TemporaryDirectory() as runtime_dir:
+            pipeline = StubTracePipeline()
+            observed_trace_refs = []
+
+            runner = SdTurboImageToImageModelRunner(
+                runtime_dir=runtime_dir,
+                pipeline_loader=lambda model_id, **kwargs: pipeline,
+                box_image_loader=lambda path, config: "box image",
+                torch_module=StubTorch,
+                now=lambda: "2026-06-02T12:00:00Z",
+                timer=iter([22.0, 22.4]).__next__,
+            )
+
+            generated = runner.generate(
+                "living",
+                seed=41100,
+                trace_callback=observed_trace_refs.append,
+            )
+
+            self.assertEqual(len(generated["trace_refs"]), 1)
+            self.assertEqual(observed_trace_refs, generated["trace_refs"])
+            self.assertTrue(Path(generated["trace_refs"][0]).exists())
+            self.assertIn("callback_on_step_end", pipeline.calls[0])
+            self.assertEqual(
+                pipeline.calls[0]["callback_on_step_end_tensor_inputs"],
+                ["latents"],
+            )
 
     def test_backend_reports_starting_and_failure_when_real_runner_preload_fails(self):
         with TemporaryDirectory() as runtime_dir:
@@ -365,7 +445,7 @@ class SdTurboRunnerTests(TestCase):
             )
 
             generated = runner.generate(
-                "absent",
+                "dead",
                 seed=41100,
                 config={"steps": 6, "strength": 0.42, "ignored": "not forwarded"},
             )

@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
         description="Manually validate Catbox's persistent SD Turbo Model Runner."
     )
     parser.add_argument("--seed", type=int, default=41100)
-    parser.add_argument("--outcome", choices=["living", "absent", "all"], default="all")
+    parser.add_argument("--outcome", choices=["living", "dead", "all"], default="all")
     parser.add_argument("--runtime-dir", default=str(DEFAULT_RUNTIME_DIR))
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE))
     return parser.parse_args()
@@ -27,7 +27,7 @@ def main() -> None:
     backend = CatboxModelBackend(model_runner=runner)
 
     responses: list[dict[str, object]] = [{"readiness": backend.readiness()}]
-    outcomes: list[Outcome] = ["living", "absent"] if args.outcome == "all" else [args.outcome]
+    outcomes: list[Outcome] = ["living", "dead"] if args.outcome == "all" else [args.outcome]
     for outcome in outcomes:
         responses.append(
             backend.observe_with_dev_controls(

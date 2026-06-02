@@ -1,6 +1,6 @@
 # Model Backend Owns Outcome Selection
 
-For the normal Catbox experience, the Model Backend will own Outcome Selection: the Browser UI sends an observation request, and the backend chooses whether to generate the Living-Cat Outcome or the Absent-Cat Outcome. Dev Controls may request a specific outcome for tuning and reproducibility, but that path is not part of the ordinary user experience.
+For the normal Catbox experience, the Model Backend will own Outcome Selection: the Browser UI sends an observation request, and the backend chooses whether to generate the Living-Cat Outcome or the Dead-Cat Outcome. Dev Controls may request a specific outcome for tuning and reproducibility, but that path is not part of the ordinary user experience.
 
 **Considered Options**
 

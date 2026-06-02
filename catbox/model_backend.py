@@ -4,9 +4,10 @@ import random
 from pathlib import Path
 from typing import Callable, Literal, Mapping, Protocol, TypedDict
 
-Outcome = Literal["living", "absent"]
+Outcome = Literal["living", "dead"]
+TraceFrameCallback = Callable[[str], None]
 
-VALID_OUTCOMES: set[str] = {"living", "absent"}
+VALID_OUTCOMES: set[str] = {"living", "dead"}
 
 _ONE_PIXEL_PNG = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
@@ -41,6 +42,7 @@ class ModelRunner(Protocol):
         outcome: Outcome,
         seed: int,
         config: dict[str, object] | None = None,
+        trace_callback: TraceFrameCallback | None = None,
     ) -> dict[str, object]: ...
 
 
@@ -58,6 +60,7 @@ class FakeModelRunner:
         outcome: Outcome,
         seed: int,
         config: dict[str, object] | None = None,
+        trace_callback: TraceFrameCallback | None = None,
     ) -> dict[str, object]:
         generation: dict[str, object] = {"outcome": outcome, "seed": seed}
         if config is not None:
@@ -66,9 +69,12 @@ class FakeModelRunner:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         image_path = self.output_dir / f"{outcome}_{seed}.png"
         image_path.write_bytes(_ONE_PIXEL_PNG)
+        if trace_callback is not None:
+            trace_callback(str(image_path))
         return {
             "image_ref": str(image_path),
             "generation_seconds": 0.001,
+            "trace_refs": [str(image_path)] if trace_callback is not None else [],
         }
 
 
@@ -90,8 +96,10 @@ class CatboxModelBackend:
             return {"status": "ready", "modelBackend": "ready"}
         return {"status": "starting", "modelBackend": "starting"}
 
-    def observe(self) -> ObservationResponse:
-        return self._observe()
+    def observe(
+        self, trace_callback: TraceFrameCallback | None = None
+    ) -> ObservationResponse:
+        return self._observe(trace_callback=trace_callback)
 
     def observe_with_dev_controls(self, overrides: dict[str, object]) -> ObservationResponse:
         forced_outcome = overrides.get("outcome")
@@ -128,6 +136,7 @@ class CatboxModelBackend:
         outcome_override: object | None = None,
         seed_override: object | None = None,
         config_overrides: object | None = None,
+        trace_callback: TraceFrameCallback | None = None,
     ) -> ObservationResponse:
         seed = seed_override if seed_override is not None else self._seed_source()
         outcome = outcome_override if outcome_override is not None else self._outcome_source()
@@ -140,7 +149,15 @@ class CatboxModelBackend:
 
         started_at = self._clock()
         try:
-            generated = self._model_runner.generate(outcome, seed, config_overrides)
+            if trace_callback is None:
+                generated = self._model_runner.generate(outcome, seed, config_overrides)
+            else:
+                generated = self._model_runner.generate(
+                    outcome,
+                    seed,
+                    config_overrides,
+                    trace_callback=trace_callback,
+                )
         except Exception as error:
             return self._generation_failure(
                 seed=seed,
@@ -158,6 +175,9 @@ class CatboxModelBackend:
         runner_metadata = generated.get("metadata")
         if isinstance(runner_metadata, Mapping):
             metadata.update(runner_metadata)
+        trace_refs = generated.get("trace_refs")
+        if isinstance(trace_refs, list):
+            metadata["traceFrameCount"] = len(trace_refs)
         if config_overrides is not None:
             metadata["configOverrides"] = config_overrides
 
@@ -165,6 +185,7 @@ class CatboxModelBackend:
             "status": "generated",
             "outcome": outcome,
             "imageRef": str(generated["image_ref"]),
+            "traceRefs": [str(ref) for ref in trace_refs] if isinstance(trace_refs, list) else [],
             "metadata": metadata,
             "revealNote": "A local diffusion model generated this outcome for this observation.",
         }
@@ -207,4 +228,4 @@ class CatboxModelBackend:
 
     @staticmethod
     def _select_outcome() -> Outcome:
-        return random.SystemRandom().choice(("living", "absent"))
+        return random.SystemRandom().choice(("living", "dead"))

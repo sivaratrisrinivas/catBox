@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Protocol
@@ -16,7 +17,7 @@ from catbox.sd_turbo_runner import DEFAULT_RUNTIME_DIR, SdTurboImageToImageModel
 class BrowserBackend(Protocol):
     def readiness(self) -> dict[str, str]: ...
 
-    def observe(self) -> dict[str, object]: ...
+    def observe(self, trace_callback=None) -> dict[str, object]: ...
 
 
 class BrowserUiResponse:
@@ -35,6 +36,8 @@ class BrowserUiApp:
     def __init__(self, backend: BrowserBackend) -> None:
         self._backend = backend
         self._generated_image_refs: set[str] = set()
+        self._trace_frame_refs: list[str] = []
+        self._lock = threading.Lock()
 
     def handle(self, method: str, path: str) -> BrowserUiResponse:
         parsed = urlparse(path)
@@ -44,6 +47,8 @@ class BrowserUiApp:
             return self._readiness()
         if method == "POST" and parsed.path == "/api/observe":
             return self._observe()
+        if method == "GET" and parsed.path == "/api/trace":
+            return self._trace()
         if method == "GET" and parsed.path == "/api/generated-outcome":
             return self._generated_outcome(parsed.query)
         return BrowserUiResponse(404, b"Not found", {"Content-Type": "text/plain; charset=utf-8"})
@@ -64,9 +69,23 @@ class BrowserUiApp:
         )
 
     def _observe(self) -> BrowserUiResponse:
-        response = self._backend.observe()
+        with self._lock:
+            self._trace_frame_refs = []
+
+        def register_trace_frame(image_ref: str) -> None:
+            with self._lock:
+                self._trace_frame_refs.append(image_ref)
+                self._generated_image_refs.add(image_ref)
+
+        response = self._backend.observe(trace_callback=register_trace_frame)
         if response.get("status") == "generated" and isinstance(response.get("imageRef"), str):
-            self._generated_image_refs.add(response["imageRef"])
+            with self._lock:
+                self._generated_image_refs.add(response["imageRef"])
+                trace_refs = response.get("traceRefs")
+                if isinstance(trace_refs, list):
+                    for trace_ref in trace_refs:
+                        if isinstance(trace_ref, str):
+                            self._generated_image_refs.add(trace_ref)
         response_bytes = json.dumps(response).encode("utf-8")
         return BrowserUiResponse(
             200,
@@ -74,9 +93,20 @@ class BrowserUiApp:
             {"Content-Type": "application/json"},
         )
 
+    def _trace(self) -> BrowserUiResponse:
+        with self._lock:
+            response = {"traceRefs": list(self._trace_frame_refs)}
+        return BrowserUiResponse(
+            200,
+            json.dumps(response).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        )
+
     def _generated_outcome(self, query: str) -> BrowserUiResponse:
         image_ref = parse_qs(query).get("imageRef", [""])[0]
-        if image_ref not in self._generated_image_refs:
+        with self._lock:
+            image_is_registered = image_ref in self._generated_image_refs
+        if not image_is_registered:
             return BrowserUiResponse(404, b"Not found", {"Content-Type": "text/plain; charset=utf-8"})
 
         image_path = Path(image_ref)
@@ -166,195 +196,282 @@ _BROWSER_UI_HTML = """<!doctype html>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #131313;
-      --surface: #1d1b19;
-      --surface-soft: rgba(255, 255, 255, 0.055);
-      --text: #f6efe4;
-      --muted: rgba(246, 239, 228, 0.66);
-      --border: rgba(246, 239, 228, 0.16);
-      --amber: #d8a05f;
-      --amber-strong: #f1bc74;
-      --teal: #6dc9bd;
-      --danger: #e46f5f;
+      --void: #070807;
+      --ink: #f4ead6;
+      --muted: rgba(244, 234, 214, 0.64);
+      --faint: rgba(244, 234, 214, 0.18);
+      --brass: #d2a460;
+      --cyan: #75d6ce;
+      --red: #e16652;
       --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-      --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      font-family: "Georgia", "Times New Roman", serif;
+      background: var(--void);
+      color: var(--ink);
     }
 
     * {
       box-sizing: border-box;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 28px 18px;
+      overflow-x: hidden;
+      overflow-y: auto;
       background:
-        radial-gradient(circle at 22% 12%, rgba(109, 201, 189, 0.18), transparent 24rem),
-        radial-gradient(circle at 78% 16%, rgba(228, 111, 95, 0.16), transparent 28rem),
-        linear-gradient(145deg, #121212 0%, #211c18 58%, #101010 100%);
+        linear-gradient(rgba(244, 234, 214, 0.028) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(244, 234, 214, 0.026) 1px, transparent 1px),
+        linear-gradient(135deg, #090a09 0%, #15120d 48%, #050606 100%);
+      background-size: 44px 44px, 44px 44px, auto;
     }
 
     main {
-      width: min(94vw, 780px);
+      min-height: 100svh;
+      position: relative;
+      isolation: isolate;
       display: grid;
-      gap: 18px;
-      justify-items: center;
-      text-align: center;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 16px;
+      padding: 24px 28px 28px;
     }
 
     .brand {
-      display: grid;
-      gap: 6px;
-      justify-items: center;
+      position: relative;
+      z-index: 3;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 18px;
     }
 
     h1 {
       margin: 0;
-      font-size: clamp(2.35rem, 10vw, 5.5rem);
-      font-weight: 850;
-      line-height: 0.88;
+      font-size: clamp(2rem, 6vw, 5.6rem);
+      font-weight: 500;
+      line-height: 0.86;
       letter-spacing: 0;
+      text-transform: uppercase;
     }
 
     .tagline {
       margin: 0;
-      max-width: 36rem;
+      max-width: 31rem;
       color: var(--muted);
-      font-size: clamp(0.95rem, 2.6vw, 1.08rem);
-      line-height: 1.45;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: clamp(0.72rem, 1.3vw, 0.9rem);
+      line-height: 1.55;
+      text-align: right;
+      text-transform: uppercase;
     }
 
     .viewport {
       width: 100%;
-      min-height: min(86vh, 690px);
-      display: grid;
-      place-items: center;
+      min-height: 0;
       position: relative;
+    }
+
+    .panel {
+      display: none;
+      place-items: center;
+      min-height: clamp(320px, calc(100svh - 220px), 700px);
+      opacity: 0;
+      pointer-events: none;
+      transition:
+        opacity 180ms var(--ease-out);
+    }
+
+    .panel.is-active {
+      display: grid;
+      opacity: 1;
+      pointer-events: auto;
     }
 
     .stage {
-      width: min(88vw, 620px);
-      aspect-ratio: 1.12;
+      position: relative;
+      width: 100%;
+      min-height: inherit;
       display: grid;
       place-items: center;
-      position: relative;
-      border: 1px solid var(--border);
-      background:
-        radial-gradient(circle at 50% 32%, rgba(246, 239, 228, 0.09), transparent 18rem),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
       overflow: hidden;
-      box-shadow: 0 34px 90px rgba(0, 0, 0, 0.34);
-    }
-
-    .stage::before {
-      content: "";
-      position: absolute;
-      inset: auto 0 0;
-      height: 34%;
-      background: linear-gradient(180deg, transparent, rgba(216, 160, 95, 0.14));
-      pointer-events: none;
-    }
-
-    .stage::after {
-      content: "";
-      position: absolute;
-      width: 70%;
-      height: 1px;
-      bottom: 28%;
-      background: linear-gradient(90deg, transparent, rgba(246, 239, 228, 0.2), transparent);
-      pointer-events: none;
     }
 
     .box {
-      width: min(58vw, 330px);
+      width: min(52vw, 430px);
       aspect-ratio: 1.25;
       position: relative;
-      transform-style: preserve-3d;
-      transform: translateY(12px) perspective(760px) rotateX(2deg);
-      border: 2px solid rgba(241, 188, 116, 0.78);
+      z-index: 1;
+      transform: translateY(24px) perspective(900px) rotateX(4deg) rotateZ(-1deg);
       background:
-        linear-gradient(115deg, rgba(255, 255, 255, 0.11), transparent 34%),
-        linear-gradient(#9f6a38, #6d421f);
+        linear-gradient(115deg, rgba(255, 255, 255, 0.16), transparent 32%),
+        linear-gradient(180deg, #b67b3a 0%, #77451f 100%);
+      border: 2px solid rgba(244, 190, 104, 0.9);
       box-shadow:
-        0 34px 70px rgba(0, 0, 0, 0.44),
-        inset 0 1px 0 rgba(255, 255, 255, 0.16);
-      transition: transform 240ms var(--ease-out);
+        0 38px 82px rgba(0, 0, 0, 0.58),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
     }
 
     .box::before {
       content: "";
       position: absolute;
-      inset: -52px -18px auto;
-      height: 62px;
-      border: 2px solid rgba(241, 188, 116, 0.88);
+      inset: -68px -22px auto;
+      height: 78px;
       background:
-        linear-gradient(110deg, rgba(255, 255, 255, 0.14), transparent 42%),
-        linear-gradient(#bf884c, #7d4d25);
-      transform: perspective(280px) rotateX(48deg);
+        linear-gradient(110deg, rgba(255, 255, 255, 0.18), transparent 45%),
+        linear-gradient(180deg, #c8924d 0%, #825126 100%);
+      border: 2px solid rgba(244, 190, 104, 0.95);
+      transform: perspective(320px) rotateX(52deg);
       transform-origin: bottom;
-      box-shadow: 0 18px 24px rgba(0, 0, 0, 0.18);
-      transition: transform 320ms var(--ease-in-out), inset 320ms var(--ease-in-out);
+      box-shadow: 0 24px 28px rgba(0, 0, 0, 0.24);
     }
 
     .box::after {
       content: "";
       position: absolute;
-      inset: 22% 18% auto;
-      height: 26%;
-      background: radial-gradient(ellipse, rgba(0, 0, 0, 0.22), transparent 66%);
-      transform: translateY(16px);
-      opacity: 0.64;
+      inset: 24% 19% auto;
+      height: 30%;
+      background: radial-gradient(ellipse, rgba(0, 0, 0, 0.3), transparent 68%);
+      transform: translateY(22px);
     }
 
-    .panel {
+    .box-label {
       position: absolute;
-      inset: 0;
-      width: 100%;
-      min-height: 100%;
-      display: grid;
-      align-content: center;
-      justify-items: center;
-      gap: 18px;
-      opacity: 0;
-      pointer-events: none;
-      transform: translateY(10px) scale(0.985);
-      filter: blur(2px);
-      transition:
-        opacity 190ms var(--ease-out),
-        transform 220ms var(--ease-out),
-        filter 220ms var(--ease-out);
+      z-index: 1;
+      left: 20px;
+      bottom: 16px;
+      color: rgba(244, 234, 214, 0.74);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
     }
 
-    .panel.is-active {
+    .trace-surface,
+    .outcome-surface {
+      width: min(88vw, 58svh, 620px);
+      aspect-ratio: 1;
       position: relative;
       display: grid;
+      place-items: center;
+    }
+
+    .trace-surface::before,
+    .outcome-surface::before {
+      content: "";
+      position: absolute;
+      inset: -16px;
+      border-top: 1px solid rgba(210, 164, 96, 0.48);
+      border-left: 1px solid rgba(117, 214, 206, 0.34);
+      border-right: 1px solid rgba(244, 234, 214, 0.1);
+      pointer-events: none;
+    }
+
+    .trace-placeholder {
+      position: absolute;
+      inset: 0;
+      background:
+        repeating-linear-gradient(104deg, rgba(210, 164, 96, 0.18) 0 1px, transparent 1px 10px),
+        repeating-radial-gradient(circle at 28% 22%, rgba(117, 214, 206, 0.16) 0 1px, transparent 1px 5px),
+        radial-gradient(circle at 50% 50%, rgba(117, 214, 206, 0.16), transparent 28rem),
+        #0d0f0e;
+      animation: trace-static 620ms steps(2, end) infinite;
+    }
+
+    @keyframes trace-static {
+      from { filter: contrast(1.05) brightness(0.92); }
+      to { filter: contrast(1.8) brightness(1.08); }
+    }
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
       opacity: 1;
+      transform: scale(1);
+      filter: contrast(1.02);
+      transition:
+        opacity 220ms var(--ease-out),
+        transform 260ms var(--ease-out),
+        filter 260ms var(--ease-out);
+    }
+
+    img[data-loading="true"],
+    #trace-frame[data-empty="true"] {
+      opacity: 0;
+      transform: scale(0.985);
+      filter: blur(8px);
+    }
+
+    #trace-frame {
+      position: relative;
+      z-index: 1;
+      image-rendering: auto;
+      mix-blend-mode: screen;
+    }
+
+    #generated-outcome {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hud {
+      position: relative;
+      z-index: 4;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 20px;
       pointer-events: auto;
-      transform: translateY(0) scale(1);
-      filter: blur(0);
+    }
+
+    .note {
+      margin: 0;
+      max-width: 58ch;
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.8rem;
+      line-height: 1.55;
+      text-transform: uppercase;
+    }
+
+    .meta {
+      margin: 0;
+      color: rgba(244, 234, 214, 0.84);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem;
+      line-height: 1.55;
+      text-transform: uppercase;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 10px;
+      pointer-events: auto;
     }
 
     button {
-      min-width: 148px;
-      min-height: 46px;
-      border: 1px solid rgba(246, 239, 228, 0.28);
-      background: linear-gradient(180deg, #fff6e7, #e6c99f);
-      color: #1b1714;
+      min-width: 132px;
+      min-height: 44px;
+      border: 1px solid rgba(244, 234, 214, 0.35);
+      background: rgba(244, 234, 214, 0.92);
+      color: #0b0b09;
       font: inherit;
-      font-weight: 700;
-      border-radius: 8px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
       cursor: pointer;
-      box-shadow:
-        0 14px 34px rgba(0, 0, 0, 0.28),
-        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
       transition:
         transform 140ms var(--ease-out),
-        box-shadow 180ms var(--ease-out),
+        background-color 180ms ease,
         border-color 180ms ease,
         opacity 180ms ease;
     }
@@ -364,18 +481,20 @@ _BROWSER_UI_HTML = """<!doctype html>
     }
 
     button:disabled {
-      opacity: 0.55;
+      opacity: 0.48;
       cursor: progress;
       box-shadow: none;
+    }
+
+    .secondary-button {
+      background: rgba(7, 8, 7, 0.34);
+      color: var(--ink);
     }
 
     @media (hover: hover) and (pointer: fine) {
       button:not(:disabled):hover {
         transform: translateY(-1px);
-        border-color: rgba(246, 239, 228, 0.48);
-        box-shadow:
-          0 18px 40px rgba(0, 0, 0, 0.32),
-          inset 0 1px 0 rgba(255, 255, 255, 0.58);
+        border-color: rgba(117, 214, 206, 0.7);
       }
 
       button:not(:disabled):hover:active {
@@ -383,133 +502,69 @@ _BROWSER_UI_HTML = """<!doctype html>
       }
     }
 
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 12px;
-    }
-
-    .noise {
-      width: min(78vw, 520px);
-      aspect-ratio: 1.18;
-      position: relative;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      background:
-        radial-gradient(circle at 50% 46%, rgba(109, 201, 189, 0.18), transparent 15rem),
-        repeating-linear-gradient(102deg, rgba(241, 188, 116, 0.18) 0 1px, transparent 1px 8px),
-        repeating-radial-gradient(circle at 26% 24%, rgba(246, 239, 228, 0.16) 0 1px, transparent 1px 5px),
-        #171717;
-      box-shadow: 0 30px 78px rgba(0, 0, 0, 0.36);
-      animation: observation-pulse 760ms steps(2, end) infinite;
-    }
-
-    .noise::before,
-    .noise::after {
-      content: "";
-      position: absolute;
-      inset: 18%;
-      border: 1px solid rgba(246, 239, 228, 0.22);
-      transform: rotate(45deg) scale(0.84);
-      animation: aperture 1600ms var(--ease-in-out) infinite alternate;
-    }
-
-    .noise::after {
-      inset: 29%;
-      border-color: rgba(109, 201, 189, 0.34);
-      animation-delay: 180ms;
-    }
-
-    @keyframes observation-pulse {
-      from { filter: contrast(1); }
-      to { filter: contrast(1.75) brightness(1.08); }
-    }
-
-    @keyframes aperture {
-      from { transform: rotate(45deg) scale(0.78); opacity: 0.38; }
-      to { transform: rotate(45deg) scale(1.04); opacity: 0.74; }
-    }
-
-    img {
-      width: min(88vw, 620px);
-      aspect-ratio: 1;
-      object-fit: contain;
-      background: #111;
-      border: 1px solid var(--border);
-      box-shadow: 0 32px 86px rgba(0, 0, 0, 0.38);
-      opacity: 1;
-      transform: scale(1);
-      transition:
-        opacity 240ms var(--ease-out),
-        transform 280ms var(--ease-out),
-        filter 280ms var(--ease-out);
-    }
-
-    img[data-loading="true"] {
-      opacity: 0;
-      transform: scale(0.975);
-      filter: blur(4px);
-    }
-
-    .meta,
-    .note {
+    .failure-title {
       margin: 0;
-      max-width: 54ch;
-      line-height: 1.55;
-      color: var(--muted);
+      color: var(--red);
+      font-size: clamp(2rem, 7vw, 6rem);
+      font-weight: 500;
+      line-height: 0.88;
+      letter-spacing: 0;
+      text-transform: uppercase;
     }
 
-    .meta {
-      display: inline-flex;
-      align-items: center;
-      min-height: 28px;
-      padding: 5px 10px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: var(--surface-soft);
-      color: rgba(246, 239, 228, 0.78);
-      font-size: 0.88rem;
+    .failure-stack {
+      display: grid;
+      gap: 16px;
+      justify-items: center;
+      text-align: center;
+      padding: 0 28px;
     }
 
     [hidden] {
       display: none !important;
     }
 
-    .failure-title {
-      margin: 0;
-      font-size: clamp(1.35rem, 5vw, 2rem);
-      line-height: 1.1;
-    }
-
-    #generation-failure-panel .stage {
-      border-color: rgba(228, 111, 95, 0.34);
-      background:
-        radial-gradient(circle at 50% 38%, rgba(228, 111, 95, 0.17), transparent 16rem),
-        linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
-    }
-
-    @media (max-width: 560px) {
-      body {
-        padding: 20px 12px;
-      }
-
+    @media (max-width: 720px) {
       main {
-        gap: 14px;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        gap: 12px;
+        padding: 18px 16px 20px;
       }
 
-      .viewport {
-        min-height: min(82vh, 610px);
+      .brand {
+        display: grid;
+        gap: 8px;
       }
 
-      .stage,
-      img {
-        width: min(94vw, 620px);
+      .tagline {
+        text-align: left;
+      }
+
+      .hud {
+        grid-template-columns: 1fr;
+      }
+
+      .actions {
+        justify-content: stretch;
+      }
+
+      button {
+        flex: 1;
       }
 
       .box {
-        width: min(66vw, 300px);
+        width: min(72vw, 360px);
       }
+
+      .trace-surface,
+      .outcome-surface {
+        width: min(94vw, 50svh, 480px);
+      }
+
+      .panel {
+        min-height: clamp(280px, calc(100svh - 250px), 560px);
+      }
+
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -522,9 +577,7 @@ _BROWSER_UI_HTML = """<!doctype html>
         transition-duration: 1ms !important;
       }
 
-      .panel,
       img[data-loading="true"] {
-        transform: none;
         filter: none;
       }
     }
@@ -534,49 +587,62 @@ _BROWSER_UI_HTML = """<!doctype html>
   <main>
     <header class="brand">
       <h1>Catbox</h1>
-      <p class="tagline">Observe the sealed box. The local model resolves one generated outcome.</p>
+      <p class="tagline">A sealed system, one entropy seed, one real denoising trace.</p>
     </header>
 
     <div class="viewport">
       <section class="panel is-active" data-state="starting" id="starting-panel" aria-live="polite">
         <div class="stage" aria-label="Catbox model backend startup">
-          <div class="box"></div>
+          <div class="box"><div class="box-label">preloading</div></div>
         </div>
-        <p class="note">Preparing the model backend</p>
       </section>
 
       <section class="panel" data-state="sealed" id="sealed-panel" aria-live="polite">
         <div class="stage" aria-label="A sealed Catbox">
-          <div class="box"></div>
+          <div class="box"><div class="box-label">unobserved</div></div>
         </div>
-        <button id="observe-button" type="button">Observe</button>
       </section>
 
       <section class="panel" data-state="waiting" id="waiting-panel" aria-live="polite">
-        <div class="noise" aria-hidden="true"></div>
-        <p class="note">Observation noise</p>
-        <p class="note" id="progressive-waiting-status" hidden>The model backend is still generating this observation.</p>
+        <div class="stage" aria-label="Captured Denoising Trace">
+          <div class="trace-surface">
+            <div class="trace-placeholder" id="trace-placeholder"></div>
+            <img id="trace-frame" alt="Captured Denoising Trace frame" data-empty="true">
+          </div>
+        </div>
       </section>
 
       <section class="panel" data-state="revealed" id="revealed-panel" aria-live="polite">
-        <img id="generated-outcome" alt="Generated Outcome" data-loading="true">
-        <p class="meta" id="outcome-metadata"></p>
-        <p class="note" id="reveal-note"></p>
-        <button id="reset-button" type="button">Reset</button>
+        <div class="stage" aria-label="Generated Outcome">
+          <div class="outcome-surface">
+            <img id="generated-outcome" alt="Generated Outcome" data-loading="true">
+          </div>
+        </div>
       </section>
 
       <section class="panel" data-state="generation-failure" id="generation-failure-panel" aria-live="assertive">
         <div class="stage" aria-label="Generation Failure">
-          <div>
-            <h1 class="failure-title">Generation Failure</h1>
+          <div class="failure-stack">
+            <h2 class="failure-title">Generation Failure</h2>
             <p class="note" id="generation-failure-message"></p>
           </div>
         </div>
-        <div class="actions">
-          <button id="retry-button" type="button">Retry</button>
-          <button id="failure-reset-button" type="button">Reset</button>
-        </div>
       </section>
+    </div>
+
+    <div class="hud">
+      <div>
+        <p class="meta" id="outcome-metadata"></p>
+        <p class="note" id="system-status">Preparing the local diffusion chamber</p>
+        <p class="note" id="progressive-waiting-status" hidden>The model is still resolving this observation.</p>
+        <p class="note" id="reveal-note"></p>
+      </div>
+      <div class="actions">
+        <button id="observe-button" type="button" disabled>Observe</button>
+        <button class="secondary-button" id="reset-button" type="button">Reset</button>
+        <button id="retry-button" type="button" hidden>Retry</button>
+        <button class="secondary-button" id="failure-reset-button" type="button" hidden>Reset</button>
+      </div>
     </div>
   </main>
 
@@ -591,17 +657,40 @@ _BROWSER_UI_HTML = """<!doctype html>
     const retryButton = document.querySelector("#retry-button");
     const failureResetButton = document.querySelector("#failure-reset-button");
     const generatedOutcome = document.querySelector("#generated-outcome");
+    const traceFrame = document.querySelector("#trace-frame");
+    const tracePlaceholder = document.querySelector("#trace-placeholder");
     const revealNote = document.querySelector("#reveal-note");
     const outcomeMetadata = document.querySelector("#outcome-metadata");
+    const systemStatus = document.querySelector("#system-status");
     const generationFailureMessage = document.querySelector("#generation-failure-message");
     const progressiveWaitingStatus = document.querySelector("#progressive-waiting-status");
     const PROGRESSIVE_WAITING_DELAY_MS = 4500;
+    const TRACE_POLL_MS = 360;
     let progressiveWaitingTimer = null;
+    let tracePollTimer = null;
+    let lastTraceRef = "";
 
     function show(panel) {
       for (const candidate of [startingPanel, sealedPanel, waitingPanel, revealedPanel, generationFailurePanel]) {
         candidate.classList.toggle("is-active", candidate === panel);
       }
+    }
+
+    function bringActivePanelIntoView(panel) {
+      window.requestAnimationFrame(() => {
+        panel.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "nearest",
+        });
+      });
+    }
+
+    function setFailureActions(isFailure) {
+      retryButton.hidden = !isFailure;
+      failureResetButton.hidden = !isFailure;
+      observeButton.hidden = isFailure;
+      resetButton.hidden = isFailure;
     }
 
     function clearProgressiveWaiting() {
@@ -625,45 +714,95 @@ _BROWSER_UI_HTML = """<!doctype html>
       );
     }
 
+    function clearTracePolling() {
+      if (tracePollTimer !== null) {
+        window.clearTimeout(tracePollTimer);
+        tracePollTimer = null;
+      }
+    }
+
+    function clearTraceFrame() {
+      lastTraceRef = "";
+      traceFrame.removeAttribute("src");
+      traceFrame.dataset.empty = "true";
+      tracePlaceholder.hidden = false;
+    }
+
+    async function pollTrace() {
+      try {
+        const response = await fetch("/api/trace");
+        const payload = await response.json();
+        const frames = Array.isArray(payload.traceRefs) ? payload.traceRefs : [];
+        const latest = frames[frames.length - 1];
+        if (latest && latest !== lastTraceRef) {
+          lastTraceRef = latest;
+          traceFrame.dataset.empty = "false";
+          tracePlaceholder.hidden = true;
+          traceFrame.src = `/api/generated-outcome?imageRef=${encodeURIComponent(latest)}`;
+          systemStatus.textContent = `Captured Denoising Trace frame ${frames.length}`;
+        }
+      } catch (error) {
+        systemStatus.textContent = "Waiting for trace frames from the Model Backend";
+      }
+      tracePollTimer = window.setTimeout(pollTrace, TRACE_POLL_MS);
+    }
+
     async function refreshReadiness() {
       const response = await fetch("/api/readiness");
       const readiness = await response.json();
       if (readiness.status === "ready") {
         observeButton.disabled = false;
+        resetButton.disabled = false;
+        systemStatus.textContent = "System sealed. Ready for observation.";
         show(sealedPanel);
         return;
       }
       observeButton.disabled = true;
+      resetButton.disabled = true;
+      systemStatus.textContent = "Preparing the local diffusion chamber";
       show(startingPanel);
       window.setTimeout(refreshReadiness, 1200);
     }
 
     function resetToSealed() {
       clearProgressiveWaiting();
+      clearTracePolling();
+      clearTraceFrame();
       generatedOutcome.removeAttribute("src");
       generatedOutcome.dataset.loading = "true";
       outcomeMetadata.textContent = "";
       revealNote.textContent = "";
       generationFailureMessage.textContent = "";
+      systemStatus.textContent = "System sealed. Ready for observation.";
       observeButton.disabled = false;
       retryButton.disabled = false;
+      setFailureActions(false);
       show(sealedPanel);
     }
 
     function showGenerationFailure(observation) {
       clearProgressiveWaiting();
+      clearTracePolling();
       const message = observation?.error?.message || "The model backend could not produce a Generated Outcome.";
       generationFailureMessage.textContent = message;
+      systemStatus.textContent = "Observation failed. Retry or reset the sealed system.";
       observeButton.disabled = false;
       retryButton.disabled = false;
+      setFailureActions(true);
       show(generationFailurePanel);
     }
 
     async function observe() {
       observeButton.disabled = true;
       retryButton.disabled = true;
+      setFailureActions(false);
+      clearTraceFrame();
+      outcomeMetadata.textContent = "";
+      revealNote.textContent = "";
+      systemStatus.textContent = "Entropy sampled. Branch selected by the Model Backend.";
       show(waitingPanel);
       startProgressiveWaitingTimer();
+      pollTrace();
 
       let observation;
       try {
@@ -676,6 +815,8 @@ _BROWSER_UI_HTML = """<!doctype html>
           },
         });
         return;
+      } finally {
+        clearTracePolling();
       }
 
       if (observation.status === "generation_failed") {
@@ -692,12 +833,16 @@ _BROWSER_UI_HTML = """<!doctype html>
       }
 
       generatedOutcome.dataset.loading = "true";
-      outcomeMetadata.textContent = `Outcome: ${observation.outcome}`;
+      const outcomeLabel = observation.outcome === "living" ? "Living Cat" : "Dead Cat";
+      const frameCount = observation.metadata.traceFrameCount || observation.traceRefs.length;
+      outcomeMetadata.textContent = `Branch: ${outcomeLabel} | Seed: ${observation.metadata.seed} | Trace frames: ${frameCount}`;
       revealNote.textContent = observation.revealNote;
+      systemStatus.textContent = "Final Generated Outcome received from the Model Backend.";
       generatedOutcome.onload = () => {
         generatedOutcome.dataset.loading = "false";
         clearProgressiveWaiting();
         show(revealedPanel);
+        bringActivePanelIntoView(revealedPanel);
       };
       generatedOutcome.onerror = () => {
         showGenerationFailure({

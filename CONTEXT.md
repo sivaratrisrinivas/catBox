@@ -1,23 +1,23 @@
 # Catbox
 
-Catbox is an interactive image-generation demo where a user clicks a sealed box and watches a local diffusion model resolve it into a cozy cat or eerie absence.
+Catbox is an interactive image-generation demo where a user clicks a sealed box and watches a local diffusion model resolve it into a cozy living cat or a non-graphic dead cat.
 
 ## Language
 
 **Catbox**:
-An interactive diffusion demo where opening a sealed box triggers a real model run that resolves into either a living-cat outcome or an eerie absent-cat outcome.
+An interactive diffusion demo where opening a sealed box triggers a real model run that resolves into either a living-cat outcome or a dead-cat outcome.
 _Avoid_: Canvas-only toy, static art reveal, fake diffusion demo
 
 **Outcome**:
-One of the final observable states produced by Catbox after the box is opened. The two planned outcomes are the living-cat outcome and the absent-cat outcome.
+One of the final observable states produced by Catbox after the box is opened. The two planned outcomes are the living-cat outcome and the dead-cat outcome.
 _Avoid_: Ending, result, branch result
 
-**Absent-Cat Outcome**:
-An outcome showing an empty box with symbolic signs of absence, such as a collar, toy, or faint impression. It should be eerie without depicting gore, explicit death, or harm.
-_Avoid_: Dead-cat outcome, ghost-cat outcome, gore branch, cartoon death
+**Dead-Cat Outcome**:
+An outcome showing a cat that is recognizably no longer alive inside the same box composition. It should be clinical or uncanny rather than graphic, and should avoid gore, visible injury, blood, mutilation, or horror spectacle.
+_Avoid_: Gore branch, mutilated cat, horror kill image, cartoon death
 
 **Living-Cat Outcome**:
-An outcome showing a cozy living cat inside the same box composition used by the absent-cat outcome.
+An outcome showing a cozy living cat inside the same box composition used by the dead-cat outcome.
 _Avoid_: Cat portrait, action reveal, mascot image
 
 **Outcome Selection**:
@@ -28,16 +28,20 @@ _Avoid_: Quantum collapse, predetermined reveal, hidden user choice
 The final image produced by the diffusion model for the selected outcome.
 _Avoid_: Static asset, reveal image, fake output
 
+**Captured Denoising Trace**:
+The real intermediate visual frames captured from the single selected diffusion path during an observation. It represents the branch Catbox actually generated, not a simulated second branch or a reconstruction after the reveal.
+_Avoid_: Fake denoising, dual-branch theater, model trace if frames were not captured
+
 **Ephemeral Outcome**:
 A generated outcome that exists only for the current Catbox session and is not automatically saved by the product.
 _Avoid_: Saved image, collectible, generation history
 
 **Recognizable Outcome**:
-A generated outcome that a viewer can immediately identify as either a cat in a box or an eerie empty box, even if the image is low-resolution or visually imperfect.
+A generated outcome that a viewer can immediately identify as either a living cat in a box or a non-graphic dead cat in a box, even if the image is low-resolution or visually imperfect.
 _Avoid_: Polished output, perfect image, abstract result
 
 **Box Composition**:
-The shared source image or sketch that anchors every Catbox generation around the same box scene before it becomes a living-cat outcome or absent-cat outcome.
+The shared source image or sketch that anchors every Catbox generation around the same box scene before it becomes a living-cat outcome or dead-cat outcome.
 _Avoid_: Input image, starter image, base asset
 
 **Observation**:
@@ -53,15 +57,15 @@ Hidden controls for tuning or reproducing Catbox generation, such as prompt, see
 _Avoid_: User controls, playground controls, settings
 
 **Outcome Prompt**:
-The prompt template that guides the model toward either the living-cat outcome or the absent-cat outcome while preserving the box composition.
+The prompt template that guides the model toward either the living-cat outcome or the dead-cat outcome while preserving the box composition.
 _Avoid_: User prompt, random prompt, prompt playground
 
 **Observation Noise**:
-The theatrical visual and audio transition shown after observation while Catbox waits for the generated outcome. It suggests diffusion without claiming to show the model's internal denoising steps.
-_Avoid_: Real denoising, model trace, intermediate frames
+The theatrical fallback transition shown after observation while Catbox waits for the generated outcome when no Captured Denoising Trace frame is available yet. It suggests diffusion without claiming to be a model frame.
+_Avoid_: Fake denoising, model trace, intermediate frames
 
 **Progressive Waiting**:
-The waiting behavior where Catbox begins with Observation Noise, then reveals subtle status only if generation takes long enough that the user might think it is stuck.
+The waiting behavior where Catbox prioritizes Captured Denoising Trace frames during observation, uses Observation Noise only before the first captured frame is available, and reveals subtle status if generation takes long enough that the user might think it is stuck.
 _Avoid_: Loading screen, debug panel, immediate spinner
 
 **Generation Failure**:
@@ -108,7 +112,7 @@ _Avoid_: Frontend, webpage, client
 
 **Developer**: Does the visual noise have to be real model denoising?
 
-**Domain expert**: No. In v1, Observation Noise is presentation while the Model Backend creates a real Generated Outcome.
+**Domain expert**: Catbox should show a Captured Denoising Trace when the Model Backend can capture real intermediate frames. Observation Noise is only the fallback before the first captured frame appears.
 
 **Developer**: What if generation is slow?
 
@@ -158,9 +162,9 @@ _Avoid_: Frontend, webpage, client
 
 **Domain expert**: No. Real quantum randomness is outside v1; Outcome Selection uses ordinary randomness.
 
-**Developer**: What does the absent branch show?
+**Developer**: What does the dead branch show?
 
-**Domain expert**: The Absent-Cat Outcome shows symbolic absence, not explicit death or harm.
+**Domain expert**: The Dead-Cat Outcome shows a recognizably lifeless cat without gore, visible injury, blood, mutilation, or horror spectacle.
 
 **Developer**: What does the living branch show?
 

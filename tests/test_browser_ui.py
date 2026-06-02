@@ -20,15 +20,19 @@ class RecordingBackend:
             return {"status": "ready", "modelBackend": "ready"}
         return {"status": "starting", "modelBackend": "starting"}
 
-    def observe(self):
+    def observe(self, trace_callback=None):
         self.observations += 1
+        if trace_callback is not None:
+            trace_callback(self.image_ref)
         return {
             "status": "generated",
             "outcome": "living",
             "imageRef": self.image_ref,
+            "traceRefs": [self.image_ref] if trace_callback is not None else [],
             "metadata": {
                 "seed": 41100,
                 "ephemeral": True,
+                "traceFrameCount": 1 if trace_callback is not None else 0,
             },
             "revealNote": "A local diffusion model generated this outcome.",
         }
@@ -41,7 +45,7 @@ class FailingBackend:
     def readiness(self):
         return {"status": "ready", "modelBackend": "ready"}
 
-    def observe(self):
+    def observe(self, trace_callback=None):
         self.observations += 1
         return {
             "status": "generation_failed",
@@ -69,11 +73,16 @@ class BrowserUiServerTests(TestCase):
         self.assertEqual(response.headers["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("data-state=\"sealed\"", html)
         self.assertIn("data-state=\"starting\"", html)
-        self.assertIn("Preparing the model backend", html)
+        self.assertIn("Preparing the local diffusion chamber", html)
         self.assertIn("id=\"observe-button\"", html)
         self.assertIn("Observe", html)
         self.assertIn("data-state=\"waiting\"", html)
-        self.assertIn("Observation noise", html)
+        self.assertIn("Captured Denoising Trace", html)
+        self.assertIn("id=\"trace-frame\"", html)
+        self.assertIn("id=\"trace-placeholder\"", html)
+        self.assertIn("TRACE_POLL_MS", html)
+        self.assertIn("pollTrace", html)
+        self.assertIn("/api/trace", html)
         self.assertIn("id=\"progressive-waiting-status\"", html)
         self.assertIn("hidden", html)
         self.assertIn("PROGRESSIVE_WAITING_DELAY_MS", html)
@@ -94,6 +103,13 @@ class BrowserUiServerTests(TestCase):
         self.assertIn("transform: scale(0.97)", html)
         self.assertIn("@media (prefers-reduced-motion: reduce)", html)
         self.assertIn("@media (hover: hover) and (pointer: fine)", html)
+        self.assertIn("overflow-y: auto", html)
+        self.assertIn("grid-template-rows: auto minmax(0, 1fr) auto", html)
+        self.assertIn(".panel {\n      display: none", html)
+        self.assertIn(".panel.is-active {\n      display: grid", html)
+        self.assertIn("bringActivePanelIntoView(revealedPanel)", html)
+        self.assertIn(".brand {\n      position: relative", html)
+        self.assertIn(".hud {\n      position: relative", html)
         self.assertNotIn("name=\"outcome\"", html)
 
     def test_readiness_endpoint_returns_backend_startup_state(self):
@@ -123,8 +139,15 @@ class BrowserUiServerTests(TestCase):
             self.assertEqual(payload["status"], "generated")
             self.assertEqual(payload["outcome"], "living")
             self.assertEqual(payload["imageRef"], str(image_path))
+            self.assertEqual(payload["traceRefs"], [str(image_path)])
             self.assertEqual(payload["metadata"]["seed"], 41100)
+            self.assertEqual(payload["metadata"]["traceFrameCount"], 1)
             self.assertEqual(payload["revealNote"], "A local diffusion model generated this outcome.")
+
+            trace_response = app.handle("GET", "/api/trace")
+            trace_payload = json.loads(trace_response.body.decode("utf-8"))
+            self.assertEqual(trace_response.status, 200)
+            self.assertEqual(trace_payload, {"traceRefs": [str(image_path)]})
 
             image_response = app.handle(
                 "GET",
