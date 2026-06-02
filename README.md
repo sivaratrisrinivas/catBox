@@ -4,6 +4,36 @@ Catbox is an interactive image-generation demo. You open a sealed box, a local
 image model runs, and the box turns into either a cozy cat scene or an eerie
 empty-box scene.
 
+## What this project is
+
+Catbox is a thin local product slice around a real image model. The user-facing
+experience is intentionally small: the Browser UI starts from a sealed box, the
+user observes it, and the local Model Backend generates one real Generated
+Outcome. The outcome is either a Living-Cat Outcome or an Absent-Cat Outcome.
+
+The project is not a static reveal, a canvas-only animation, a gallery, or a
+prompt playground. The normal path does not let the Browser UI choose the
+outcome or tune generation. Those controls exist only in development paths for
+validation and reproducibility.
+
+## Why this exists
+
+The model spike showed that `sd_turbo_img2img` can create recognizable cat and
+empty-box images after the model is loaded. This backend turns that experiment
+into code the rest of Catbox can use:
+
+- the browser asks to observe the box instead of choosing the result itself;
+- the backend is the source of truth for which scene was chosen;
+- Dev Controls can force `living` or `absent` without changing normal
+  observation behavior;
+- Dev Controls can pass a seed and generation settings to reproduce a run;
+- generated images are returned as local file paths plus details about the run;
+- failures stay visible instead of being hidden behind placeholder images.
+
+Catbox v1 treats generated files as Ephemeral Outcomes. They may exist locally
+long enough for display and debugging, but the product does not provide
+gallery/history/save/share behavior.
+
 ## Model backend and Browser UI
 
 The current code defines the small Python boundary that the Browser UI calls:
@@ -30,21 +60,25 @@ The local Browser UI is served by `python -m catbox.browser_ui`. It starts from
 a sealed box, sends a normal observation request without choosing an outcome,
 waits while the Model Backend runs, reveals the generated image from the
 backend-provided local file reference, shows the Reveal Note, and supports Reset
-back to the sealed box.
+back to the sealed box. If generation fails, the Browser UI shows Generation
+Failure with Retry and Reset instead of registering or serving a fake generated
+image.
 
-## Why this exists
+## How the project fits together
 
-The model spike showed that `sd_turbo_img2img` can create recognizable cat and
-empty-box images after the model is loaded. This backend turns that experiment
-into code the rest of Catbox can use:
-
-- the browser asks to observe the box instead of choosing the result itself;
-- the backend is the source of truth for which scene was chosen;
-- Dev Controls can force `living` or `absent` without changing normal
-  observation behavior;
-- Dev Controls can pass a seed and generation settings to reproduce a run;
-- generated images are returned as local file paths plus details about the run;
-- failures stay visible instead of being hidden behind placeholder images.
+- `catbox/model_backend.py` owns readiness, Outcome Selection, Dev Controls, and
+  the observation response contract.
+- `catbox/sd_turbo_runner.py` owns the persistent SD Turbo image-to-image runner,
+  prompt selection, generation settings, timing, and ephemeral file output.
+- `catbox/browser_ui.py` owns the local Browser UI, readiness polling, normal
+  observation requests, generated image serving, Progressive Waiting, Generation
+  Failure, Retry, and Reset.
+- `catbox/validate_sd_turbo_runner.py` is the manual Dev Controls validation
+  entrypoint for forcing outcomes on the local machine.
+- `tests/` covers the public backend, runner, Browser UI, and manual validation
+  documentation contracts with fakes and stubs instead of requiring GPU access.
+- `docs/adr/` records the project decisions that keep the Browser UI thin, the
+  Model Backend authoritative, and Generated Outcomes ephemeral.
 
 ## How to verify
 
@@ -87,3 +121,8 @@ prints the same response shape the Browser UI will use.
 The current preferred settings were manually validated on the local CUDA path:
 the Living-Cat Outcome uses 384px image-to-image generation with 2 steps, and
 the Absent-Cat Outcome uses 512px image-to-image generation with 2 steps.
+
+For the complete first-observation GPU validation checklist, including Browser
+UI readiness, normal observation, forced Dev Controls outcomes, runtime timing,
+ephemeral output files, and failure retry/reset behavior, see
+`docs/manual-gpu-validation.md`.
