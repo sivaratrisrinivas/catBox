@@ -4,10 +4,9 @@ Catbox is an interactive image-generation demo. You open a sealed box, a local
 image model runs, and the box turns into either a cozy cat scene or an eerie
 empty-box scene.
 
-## Model backend
+## Model backend and Browser UI
 
-The current code defines the small Python boundary that the browser will call
-later:
+The current code defines the small Python boundary that the Browser UI calls:
 
 - `readiness()` says whether the model backend is ready.
 - `observe()` is the normal path. The backend chooses which scene to generate.
@@ -26,6 +25,12 @@ contract.
 
 The fake runner is only for tests and early wiring. It lets the backend behavior
 be checked quickly without CUDA, model downloads, or slow image generation.
+
+The local Browser UI is served by `python -m catbox.browser_ui`. It starts from
+a sealed box, sends a normal observation request without choosing an outcome,
+waits while the Model Backend runs, reveals the generated image from the
+backend-provided local file reference, shows the Reveal Note, and supports Reset
+back to the sealed box.
 
 ## Why this exists
 
@@ -51,6 +56,19 @@ python -m unittest discover -s tests
 
 These tests use fakes and stubs around the expensive model path. They do not
 need GPU access or model downloads.
+
+Run the local Browser UI:
+
+```bash
+python -m catbox.browser_ui
+```
+
+Then open `http://127.0.0.1:8765`. The page starts from the sealed box, sends a
+normal observation request to the Model Backend without choosing an outcome,
+shows a minimal waiting state, reveals the generated image from the returned
+local file reference, shows the Reveal Note, and lets Reset return to the sealed
+box. The first real run may download model files before the observation
+completes.
 
 Manual GPU validation for the preferred local machine:
 
