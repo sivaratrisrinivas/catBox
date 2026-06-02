@@ -1,6 +1,8 @@
 .venv/
 .uv-cache/
 .hf-cache/
+.scratch/
+.runtime/
 __pycache__/
 .pytest_cache/
 

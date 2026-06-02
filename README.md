@@ -18,10 +18,14 @@ later:
 - Failed observations return a clear error instead of pretending that an image
   was generated.
 
+The SD Turbo runner is the real product path for the first Model Backend. It
+loads `stabilityai/sd-turbo` once, loads the shared Box Composition, picks the
+right Outcome Prompt, writes an ephemeral generated image under `.runtime/`, and
+returns the local file path plus generation metadata through the backend
+contract.
+
 The fake runner is only for tests and early wiring. It lets the backend behavior
-be checked quickly without CUDA, model downloads, or slow image generation. The
-real product path still needs to run a real local image model behind the same
-runner interface.
+be checked quickly without CUDA, model downloads, or slow image generation.
 
 ## Why this exists
 
@@ -45,5 +49,19 @@ Run the contract tests:
 python -m unittest discover -s tests
 ```
 
-These tests use the fake runner and do not need GPU access. Manual GPU testing
-comes later, once the real SD Turbo runner is connected.
+These tests use fakes and stubs around the expensive model path. They do not
+need GPU access or model downloads.
+
+Manual GPU validation for the preferred local machine:
+
+```bash
+python -m catbox.validate_sd_turbo_runner --outcome all --seed 41100
+```
+
+That command preloads SD Turbo once, forces both Catbox outcomes through the
+development-only path, writes ephemeral generated images under `.runtime/`, and
+prints the same response shape the Browser UI will use.
+
+The current preferred settings were manually validated on the local CUDA path:
+the Living-Cat Outcome uses 384px image-to-image generation with 2 steps, and
+the Absent-Cat Outcome uses 512px image-to-image generation with 2 steps.

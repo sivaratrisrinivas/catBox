@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from catbox.model_backend import CatboxModelBackend, FakeModelRunner
+from catbox.sd_turbo_runner import SdTurboImageToImageModelRunner
 
 
 class FailingModelRunner(FakeModelRunner):
@@ -210,3 +211,167 @@ class ModelBackendTests(TestCase):
             self.assertIn("object", response["error"]["message"])
             self.assertNotIn("imageRef", response)
             self.assertEqual(runner.generations, [])
+
+
+class StubGeneratedImage:
+    def __init__(self) -> None:
+        self.saved_path = None
+
+    def save(self, path):
+        self.saved_path = path
+        Path(path).write_bytes(b"generated image")
+
+
+class StubPipeline:
+    def __init__(self) -> None:
+        self.calls = []
+        self.generated_image = StubGeneratedImage()
+
+    def to(self, device):
+        self.device = device
+        return self
+
+    def enable_attention_slicing(self):
+        self.attention_slicing_enabled = True
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return type("PipelineResult", (), {"images": [self.generated_image]})()
+
+
+class StubTorch:
+    float16 = "float16"
+    float32 = "float32"
+
+    class cuda:
+        @staticmethod
+        def is_available():
+            return False
+
+    class Generator:
+        def __init__(self, device):
+            self.device = device
+            self.seed = None
+
+        def manual_seed(self, seed):
+            self.seed = seed
+            return self
+
+
+class SdTurboRunnerTests(TestCase):
+    def test_real_runner_generates_selected_outcome_file_with_prompt_and_metadata(self):
+        with TemporaryDirectory() as runtime_dir:
+            pipeline = StubPipeline()
+            loaded = []
+            box_image_loads = []
+
+            def load_pipeline(model_id, **kwargs):
+                loaded.append({"model_id": model_id, "kwargs": kwargs})
+                return pipeline
+
+            def load_box_image(path, config):
+                box_image_loads.append({"width": config.width, "height": config.height})
+                return "box image"
+
+            runner = SdTurboImageToImageModelRunner(
+                runtime_dir=runtime_dir,
+                pipeline_loader=load_pipeline,
+                box_image_loader=load_box_image,
+                torch_module=StubTorch,
+                now=lambda: "2026-06-02T12:00:00Z",
+                timer=iter([10.0, 10.25]).__next__,
+            )
+
+            generated = runner.generate("living", seed=41100)
+
+            self.assertTrue(runner.is_ready())
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0]["model_id"], "stabilityai/sd-turbo")
+            self.assertEqual(generated["generation_seconds"], 0.25)
+            self.assertTrue(Path(generated["image_ref"]).exists())
+            self.assertIn("living cat", pipeline.calls[0]["prompt"])
+            self.assertEqual(pipeline.calls[0]["num_inference_steps"], 2)
+            self.assertEqual(pipeline.calls[0]["strength"], 0.8)
+            self.assertEqual(box_image_loads, [{"width": 384, "height": 384}])
+            self.assertNotIn("negative_prompt", pipeline.calls[0])
+            self.assertEqual(generated["metadata"]["runner"], "sd_turbo_img2img")
+            self.assertEqual(generated["metadata"]["device"], "cpu")
+
+    def test_backend_response_includes_real_runner_metadata(self):
+        with TemporaryDirectory() as runtime_dir:
+            pipeline = StubPipeline()
+
+            runner = SdTurboImageToImageModelRunner(
+                runtime_dir=runtime_dir,
+                pipeline_loader=lambda model_id, **kwargs: pipeline,
+                box_image_loader=lambda path, config: "box image",
+                torch_module=StubTorch,
+                now=lambda: "2026-06-02T12:00:00Z",
+                timer=iter([20.0, 20.5]).__next__,
+            )
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                seed_source=lambda: 41100,
+                outcome_source=lambda: "absent",
+                clock=lambda: 123.0,
+            )
+
+            response = backend.observe()
+
+            self.assertEqual(response["status"], "generated")
+            self.assertEqual(response["outcome"], "absent")
+            self.assertTrue(Path(response["imageRef"]).exists())
+            self.assertEqual(response["metadata"]["seed"], 41100)
+            self.assertEqual(response["metadata"]["generationSeconds"], 0.5)
+            self.assertEqual(response["metadata"]["runner"], "sd_turbo_img2img")
+            self.assertEqual(response["metadata"]["device"], "cpu")
+
+    def test_backend_reports_starting_and_failure_when_real_runner_preload_fails(self):
+        with TemporaryDirectory() as runtime_dir:
+            def fail_to_load(model_id, **kwargs):
+                raise RuntimeError("model weights unavailable")
+
+            runner = SdTurboImageToImageModelRunner(
+                runtime_dir=runtime_dir,
+                pipeline_loader=fail_to_load,
+                box_image_loader=lambda path, config: "box image",
+                torch_module=StubTorch,
+            )
+            backend = CatboxModelBackend(
+                model_runner=runner,
+                seed_source=lambda: 41100,
+                outcome_source=lambda: "living",
+            )
+
+            readiness = backend.readiness()
+            response = backend.observe()
+
+            self.assertEqual(readiness["status"], "starting")
+            self.assertEqual(response["status"], "generation_failed")
+            self.assertEqual(response["error"]["type"], "RuntimeError")
+            self.assertIn("model weights unavailable", response["error"]["message"])
+            self.assertNotIn("imageRef", response)
+
+    def test_real_runner_applies_generation_config_overrides(self):
+        with TemporaryDirectory() as runtime_dir:
+            pipeline = StubPipeline()
+            runner = SdTurboImageToImageModelRunner(
+                runtime_dir=runtime_dir,
+                pipeline_loader=lambda model_id, **kwargs: pipeline,
+                box_image_loader=lambda path, config: "box image",
+                torch_module=StubTorch,
+                now=lambda: "2026-06-02T12:00:00Z",
+                timer=iter([30.0, 30.75]).__next__,
+            )
+
+            generated = runner.generate(
+                "absent",
+                seed=41100,
+                config={"steps": 6, "strength": 0.42, "ignored": "not forwarded"},
+            )
+
+            self.assertEqual(pipeline.calls[0]["num_inference_steps"], 6)
+            self.assertEqual(pipeline.calls[0]["strength"], 0.42)
+            self.assertEqual(generated["metadata"]["config"]["steps"], 6)
+            self.assertEqual(generated["metadata"]["config"]["strength"], 0.42)
+            self.assertNotIn("ignored", generated["metadata"]["config"])

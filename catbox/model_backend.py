@@ -155,6 +155,9 @@ class CatboxModelBackend:
             "generationSeconds": generated["generation_seconds"],
             "ephemeral": True,
         }
+        runner_metadata = generated.get("metadata")
+        if isinstance(runner_metadata, Mapping):
+            metadata.update(runner_metadata)
         if config_overrides is not None:
             metadata["configOverrides"] = config_overrides
 
