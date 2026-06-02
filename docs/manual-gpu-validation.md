@@ -132,6 +132,9 @@ clearer outcome identity.
 The current preferred SD Turbo settings are outcome-specific and may be changed
 through Dev Controls during validation. Outcome Visibility uses one shared
 standard for both outcomes, but each outcome may use different tuning values.
+The current tuned defaults use 512px image-to-image generation with 6 steps for
+both outcomes. The Living-Cat Outcome uses strength `0.78`, and the Dead-Cat
+Outcome uses strength `0.7`.
 
 ## Ephemeral Generated Outcomes
 

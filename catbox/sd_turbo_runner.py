@@ -30,12 +30,14 @@ class SdTurboImageToImageConfig:
 
 PROMPTS: dict[Outcome, str] = {
     "living": (
-        "cozy living cat curled inside the same open cardboard box, warm soft light, "
-        "photoreal lab instant photo, clear cat in box, charming but not cartoonish"
+        "large clearly visible living cat occupying the center of the same open "
+        "cardboard box, full cat body visible inside the box, bright soft lab light, "
+        "photoreal instant photo, sharp recognizable cat, charming but not cartoonish"
     ),
     "dead": (
-        "same open cardboard box with a motionless deceased cat lying inside, closed eyes, "
-        "no blood, no wounds, no gore, uncanny Schrodinger experiment photograph, clinical lab light"
+        "large clearly visible motionless cat lying on its side inside the same open "
+        "cardboard box, full cat body visible, closed eyes, clinical lab light, "
+        "uncanny Schrodinger experiment photograph, no blood, no wounds, no gore"
     ),
 }
 
@@ -50,8 +52,8 @@ NEGATIVE_PROMPTS: dict[Outcome, str] = {
 }
 
 OUTCOME_DEFAULTS: dict[Outcome, dict[str, object]] = {
-    "living": {"steps": 4, "strength": 0.8, "width": 384, "height": 384},
-    "dead": {"steps": 2, "strength": 0.55},
+    "living": {"steps": 6, "strength": 0.78, "width": 512, "height": 512},
+    "dead": {"steps": 6, "strength": 0.7, "width": 512, "height": 512},
 }
 
 GENERATION_CONFIG_FIELDS = {"steps", "strength", "guidance_scale", "width", "height"}

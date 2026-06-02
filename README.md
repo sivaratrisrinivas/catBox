@@ -174,6 +174,10 @@ Outcomes are immediately recognizable, the Dead-Cat Outcome remains
 non-graphic, the shared Box Composition is still legible, and
 `metadata.generationSeconds` stays under the Primary Runtime Target.
 
+The current tuned SD Turbo defaults emphasize Outcome Visibility: both outcomes
+use 512px image-to-image generation with 6 steps. The Living-Cat Outcome uses
+strength `0.78`, and the Dead-Cat Outcome uses strength `0.7`.
+
 For the complete first-observation GPU validation checklist, including Browser
 UI readiness, normal observation, forced Dev Controls outcomes, runtime timing,
 ephemeral output files, and failure retry/reset behavior, see
